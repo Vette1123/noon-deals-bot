@@ -177,10 +177,13 @@ def _normalize_item(item: dict) -> dict | None:
     if not all([name, catalog_sku, sale_price]):
         return None
 
+    # Strip Algolia variant suffix (e.g. "ZA0AB67C35C636E494094Z-1" → "ZA0AB67C35C636E494094Z")
+    clean_sku = re.sub(r"-\d+$", "", str(catalog_sku))
+
     return {
         "name": name,
-        "sku": str(sku),
-        "url": f"https://www.noon.com/egypt-en/{slug}/p/{catalog_sku}/",
+        "sku": clean_sku,
+        "url": f"https://www.noon.com/egypt-en/{slug}/p/{clean_sku}/",
         "image_url": image_url,
         "sale_price": float(sale_price),
         "original_price": float(original_price),
