@@ -10,15 +10,16 @@ DEALS_URL = (
 )
 
 
-MAX_PAGES = 10  # ~490 products per run (10 pages × ~49 each)
+MAX_PAGES = 10       # total pages available on Noon
+PAGES_PER_RUN = 2    # Zenrows requests per run (keep credits low)
 
 
-def fetch_products() -> list[dict]:
-    """Fetch discounted Noon Egypt products across multiple pages via Zenrows."""
+def fetch_products(start_page: int = 1) -> list[dict]:
+    """Fetch PAGES_PER_RUN pages starting from start_page via Zenrows."""
     all_products: list[dict] = []
     seen_skus: set[str] = set()
 
-    for page in range(1, MAX_PAGES + 1):
+    for page in range(start_page, start_page + PAGES_PER_RUN):
         html = _fetch_html(page)
         products = parse_products_from_html(html)
 
@@ -31,13 +32,13 @@ def fetch_products() -> list[dict]:
 
         print(f"  Page {page}: {len(products)} products ({new_count} new)")
 
-        if new_count == 0:
-            print(f"  No new products on page {page}, stopping.")
+        if len(products) == 0:
+            print(f"  Page {page} empty — reached end of results.")
             break
 
     if not all_products:
         raise RuntimeError(
-            "Scraped 0 products across all pages. "
+            "Scraped 0 products. "
             "The page structure may have changed — check raw HTML in logs."
         )
     return all_products

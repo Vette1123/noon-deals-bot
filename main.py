@@ -1,14 +1,30 @@
 import os
 import sys
+import json
 import time
-from scraper import fetch_products
+from scraper import fetch_products, MAX_PAGES, PAGES_PER_RUN
 from filters import filter_deals, load_posted, save_posted, MIN_DISCOUNT
 from affiliate import build_affiliate_link
 from telegram_poster import post_deal
 
 POSTED_FILE = "posted.json"
+STATE_FILE  = "state.json"
 MAX_POSTS_PER_RUN = 50
 DELAY_BETWEEN_POSTS = 3
+
+
+def _load_state() -> dict:
+    try:
+        with open(STATE_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {"next_page": 1}
+
+
+def _save_state(state: dict) -> None:
+    with open(STATE_FILE, "w") as f:
+        json.dump(state, f, indent=2)
+
 
 def run(dry_run: bool = False) -> None:
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -18,8 +34,10 @@ def run(dry_run: bool = False) -> None:
     if not bot_token and not dry_run:
         raise ValueError("TELEGRAM_BOT_TOKEN is required")
 
-    print("Fetching Noon Egypt deals...")
-    products = fetch_products()
+    state = _load_state()
+    start_page = state.get("next_page", 1)
+    print(f"Fetching Noon Egypt deals (pages {start_page}–{start_page + PAGES_PER_RUN - 1})...")
+    products = fetch_products(start_page=start_page)
     print(f"Found {len(products)} products")
 
     already_posted = load_posted(POSTED_FILE)
@@ -58,8 +76,16 @@ def run(dry_run: bool = False) -> None:
         else:
             print(f"Failed: {product['name']}")
 
+    # Advance page cursor; wrap and reset history after full cycle
+    next_page = start_page + PAGES_PER_RUN
+    if next_page > MAX_PAGES:
+        next_page = 1
+        already_posted = {}
+        print("Full cycle complete — resetting posted history for next round.")
+
+    _save_state({"next_page": next_page})
     save_posted(already_posted, POSTED_FILE)
-    print(f"Done. Posted {posted} deals.")
+    print(f"Done. Posted {posted} deals. Next run starts at page {next_page}.")
 
 if __name__ == "__main__":
     run(dry_run="--dry-run" in sys.argv)
