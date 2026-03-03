@@ -25,12 +25,13 @@ def post_deal(product: dict, bot_token: str, channel_id: str) -> bool:
 
     async def _run():
         if product.get("image_url"):
+            print(f"  Sending photo: {product['image_url']}")
             try:
                 await bot.send_photo(chat_id=channel_id, photo=product["image_url"],
                                      caption=caption, parse_mode="MarkdownV2")
                 return True
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"  Photo failed ({e}), falling back to text")
         await bot.send_message(chat_id=channel_id, text=caption, parse_mode="MarkdownV2")
         return True
 

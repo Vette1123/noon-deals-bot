@@ -60,9 +60,9 @@ def build_affiliate_link(product_url: str, product_name: str, session_cookie: st
     short_url = (
         data.get("url") or data.get("shortUrl") or data.get("short_url") or data.get("link")
     )
-    # API returns linkCode but leaves shortUrl null — construct it manually
-    if not short_url and data.get("linkCode"):
-        short_url = f"https://s.noon.com/{data['linkCode']}"
+    # API sometimes returns linkCode but leaves shortUrl null — use product URL as fallback
+    if not short_url:
+        short_url = data.get("linkTemplate")
 
     if not short_url:
         raise AffiliateError(f"Affiliate API returned unexpected response: {data}")
