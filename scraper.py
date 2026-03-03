@@ -10,7 +10,7 @@ DEALS_URL = (
 )
 
 
-MAX_PAGES = 5  # ~245 products per run (5 pages × ~49 each)
+MAX_PAGES = 10  # ~490 products per run (10 pages × ~49 each)
 
 
 def fetch_products() -> list[dict]:
