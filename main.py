@@ -2,7 +2,7 @@ import os
 import sys
 import time
 from scraper import fetch_products
-from filters import filter_deals, load_posted, save_posted
+from filters import filter_deals, load_posted, save_posted, MIN_DISCOUNT
 from affiliate import build_affiliate_link
 from telegram_poster import post_deal
 
@@ -24,7 +24,7 @@ def run(dry_run: bool = False) -> None:
 
     already_posted = load_posted(POSTED_FILE)
     new_deals = filter_deals(products, already_posted)
-    print(f"{len(new_deals)} new qualifying deals (>=20% off)")
+    print(f"{len(new_deals)} new qualifying deals (>={MIN_DISCOUNT}% off)")
 
     if not new_deals:
         print("Nothing new to post.")
