@@ -56,13 +56,28 @@ def build_affiliate_link(product_url: str, product_name: str, session_cookie: st
         raise AffiliateError(f"Affiliate API request failed: {e}") from e
 
     data = response.json()
+    print(f"  Affiliate API response: {data}")
 
     short_url = (
-        data.get("url") or data.get("shortUrl") or data.get("short_url") or data.get("link")
+        data.get("url") or data.get("shortUrl") or data.get("short_url")
+        or data.get("link") or data.get("trackingLink") or data.get("customLink")
+        or data.get("tracking_url") or data.get("redirect_url")
     )
-    # API sometimes returns linkCode but leaves shortUrl null — use product URL as fallback
+
+    # Try nested data wrapper (some APIs wrap response)
+    if not short_url and isinstance(data.get("data"), dict):
+        short_url = data["data"].get("url") or data["data"].get("shortUrl")
+
+    # If API returned linkCode, try constructing noon short URL
+    if not short_url and data.get("linkCode"):
+        short_url = f"https://s.noon.com/{data['linkCode']}"
+        print(f"  Constructed short URL from linkCode: {short_url}")
+
+    # Last resort: fall back to product URL (no affiliate tracking)
     if not short_url:
         short_url = data.get("linkTemplate")
+        if short_url:
+            print("  WARNING: affiliate API returned no tracking URL — using plain product URL")
 
     if not short_url:
         raise AffiliateError(f"Affiliate API returned unexpected response: {data}")

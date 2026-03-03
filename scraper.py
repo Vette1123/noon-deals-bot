@@ -185,7 +185,7 @@ def _normalize_item(item: dict) -> dict | None:
     return {
         "name": name,
         "sku": clean_sku,
-        "url": f"https://www.noon.com/egypt-en/{slug}/p/{clean_sku}/",
+        "url": f"https://www.noon.com/egypt-en/{slug}/{clean_sku}/p/",
         "image_url": image_url,
         "sale_price": float(sale_price),
         "original_price": float(original_price),
