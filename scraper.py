@@ -28,16 +28,14 @@ def _fetch_html() -> str:
     if not api_key:
         raise RuntimeError("ZENROWS_API_KEY is not set. Add it as a GitHub secret.")
 
-    resp = requests.get(
-        "https://api.zenrows.com/v1/",
-        params={
-            "apikey": api_key,
-            "url": DEALS_URL,
-            "antibot": "true",
-            "js_render": "true",
-        },
-        timeout=120,
-    )
+    params = {"apikey": api_key, "url": DEALS_URL, "antibot": "true", "js_render": "true"}
+    resp = requests.get("https://api.zenrows.com/v1/", params=params, timeout=120)
+
+    if resp.status_code == 422:
+        print("  Zenrows 422 — retrying with premium proxy...")
+        params["premium_proxy"] = "true"
+        resp = requests.get("https://api.zenrows.com/v1/", params=params, timeout=120)
+
     if not resp.ok:
         raise RuntimeError(f"Zenrows error {resp.status_code}: {resp.text[:300]}")
     print(f"  Fetched {len(resp.text):,} bytes via Zenrows")
@@ -135,10 +133,12 @@ def _find_key(data, key):
 
 def _normalize_item(item: dict) -> dict | None:
     name = item.get("name") or item.get("title")
-    sku = item.get("sku") or item.get("id") or item.get("product_id")
+    # catalog_sku is the parent product SKU used in noon.com URLs
+    catalog_sku = item.get("catalog_sku") or item.get("sku") or item.get("id")
+    sku = item.get("sku") or catalog_sku
+
     raw = item.get("url") or item.get("slug") or item.get("url_key") or ""
-    # Strip any locale prefix (e.g. "egypt-en/slug" → "slug")
-    slug = re.sub(r"^[a-z]+-[a-z]+/", "", raw) or sku
+    slug = re.sub(r"^[a-z]+-[a-z]+/", "", raw) or catalog_sku
 
     sale_price = (
         item.get("sale_price") or item.get("now_price")
@@ -164,17 +164,32 @@ def _normalize_item(item: dict) -> dict | None:
         image_key = keys[0] if keys else None
     image_url = f"https://f.nooncdn.com/p/{image_key}_t300.jpg" if image_key else None
 
-    if not all([name, sku, sale_price]):
+    # Rating
+    rating_raw = item.get("product_rating")
+    if isinstance(rating_raw, dict):
+        rating = rating_raw.get("value") or rating_raw.get("average")
+        rating_count = rating_raw.get("count") or rating_raw.get("nb_reviews")
+    elif rating_raw:
+        rating, rating_count = float(rating_raw), None
+    else:
+        rating, rating_count = None, None
+
+    if not all([name, catalog_sku, sale_price]):
         return None
 
     return {
         "name": name,
         "sku": str(sku),
-        "url": f"https://www.noon.com/egypt-en/{slug}/p/{sku}/",
+        "url": f"https://www.noon.com/egypt-en/{slug}/p/{catalog_sku}/",
         "image_url": image_url,
         "sale_price": float(sale_price),
         "original_price": float(original_price),
         "discount_pct": int(discount_pct),
+        "brand": item.get("brand") or "",
+        "rating": round(float(rating), 1) if rating else None,
+        "rating_count": int(rating_count) if rating_count else None,
+        "store_name": item.get("store_name") or "",
+        "estimated_delivery": item.get("estimated_delivery_date") or "",
     }
 
 

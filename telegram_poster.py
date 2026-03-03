@@ -16,12 +16,32 @@ def format_message(product: dict) -> str:
     orig = _escape_md2(f"{product['original_price']:,.0f}")
     disc = _escape_md2(f"{product['discount_pct']}%")
     url  = product["affiliate_url"]
-    return (
-        f"🔥 *{name}*\n\n"
-        f"💰 EGP {sale} ~\\(كان EGP {orig}\\)~\n"
-        f"📉 خصم {disc}\n\n"
-        f"🛒 [اشتري دلوقتي]({url})"
-    )
+
+    lines = [f"🔥 *{name}*"]
+
+    if product.get("brand"):
+        lines.append(f"🏷️ {_escape_md2(product['brand'])}")
+
+    lines.append("")
+    lines.append(f"💰 EGP {sale} ~\\(كان EGP {orig}\\)~")
+    lines.append(f"📉 خصم {disc}")
+
+    if product.get("rating"):
+        stars = "⭐" * round(product["rating"])
+        r = _escape_md2(f"{product['rating']}")
+        cnt = f" \\({_escape_md2(str(product['rating_count']))} تقييم\\)" if product.get("rating_count") else ""
+        lines.append(f"{stars} {r}/5{cnt}")
+
+    if product.get("estimated_delivery"):
+        lines.append(f"🚚 {_escape_md2(product['estimated_delivery'])}")
+
+    if product.get("store_name"):
+        lines.append(f"🏪 {_escape_md2(product['store_name'])}")
+
+    lines.append("")
+    lines.append(f"🛒 [اشتري دلوقتي]({url})")
+
+    return "\n".join(lines)
 
 
 def _download_image(url: str) -> BytesIO | None:
