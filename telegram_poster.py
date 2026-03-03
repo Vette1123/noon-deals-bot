@@ -16,6 +16,7 @@ def format_message(product: dict) -> str:
     sale = _escape_md2(f"{product['sale_price']:,.0f}")
     orig = _escape_md2(f"{product['original_price']:,.0f}")
     disc = _escape_md2(f"{product['discount_pct']}%")
+    url  = product.get("affiliate_url", "")
 
     lines = [f"🔥 *{name}*"]
 
@@ -37,6 +38,9 @@ def format_message(product: dict) -> str:
 
     if product.get("store_name"):
         lines.append(f"🏪 {_escape_md2(product['store_name'])}")
+
+    lines.append("")
+    lines.append(f"👉 *[🛒 اشتري دلوقتي]({url})*")
 
     return "\n".join(lines)
 
