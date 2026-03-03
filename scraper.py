@@ -11,8 +11,9 @@ DEALS_URL = (
 
 
 def fetch_products() -> list[dict]:
-    """Fetch discounted Noon Egypt products via ScraperAPI (bypasses Akamai)."""
+    """Fetch discounted Noon Egypt products via Zenrows (bypasses Akamai)."""
     html = _fetch_html()
+    _debug_html(html)
     products = parse_products_from_html(html)
     if not products:
         raise RuntimeError(
@@ -20,6 +21,40 @@ def fetch_products() -> list[dict]:
             "The page structure may have changed — check raw HTML in logs."
         )
     return products
+
+
+def _debug_html(html: str) -> None:
+    """Print structural clues to help diagnose parsing failures."""
+    print(f"  Page size: {len(html):,} bytes")
+    print(f"  First 300 chars: {html[:300]!r}")
+
+    soup = BeautifulSoup(html, "html.parser")
+
+    # Check __NEXT_DATA__
+    tag = soup.find("script", {"id": "__NEXT_DATA__"})
+    if tag:
+        try:
+            data = json.loads(tag.string)
+            def _keys(d, depth=0):
+                if depth > 3 or not isinstance(d, dict):
+                    return
+                for k, v in d.items():
+                    print(f"  {'  ' * depth}[next_data] {k}: {type(v).__name__}" +
+                          (f" len={len(v)}" if isinstance(v, (list, dict)) else ""))
+                    _keys(v, depth + 1)
+            print("  __NEXT_DATA__ structure:")
+            _keys(data)
+        except Exception as e:
+            print(f"  __NEXT_DATA__ parse error: {e}")
+    else:
+        print("  WARNING: no __NEXT_DATA__ script tag found")
+
+    # Check for product-related tags
+    for selector in ["data-qa", "data-testid", "class"]:
+        sample = soup.find(attrs={selector: True})
+        if sample:
+            print(f"  Sample tag with {selector}={sample.get(selector)!r}: <{sample.name}>")
+            break
 
 
 def _fetch_html() -> str:
