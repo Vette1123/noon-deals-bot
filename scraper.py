@@ -136,7 +136,9 @@ def _find_key(data, key):
 def _normalize_item(item: dict) -> dict | None:
     name = item.get("name") or item.get("title")
     sku = item.get("sku") or item.get("id") or item.get("product_id")
-    slug = item.get("slug") or item.get("url_key") or item.get("url") or sku
+    raw = item.get("url") or item.get("slug") or item.get("url_key") or ""
+    # Strip any locale prefix (e.g. "egypt-en/slug" → "slug")
+    slug = re.sub(r"^[a-z]+-[a-z]+/", "", raw) or sku
 
     sale_price = (
         item.get("sale_price") or item.get("now_price")
