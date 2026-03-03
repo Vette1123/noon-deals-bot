@@ -101,9 +101,12 @@ def _parse_rsc_payload(html: str) -> list[dict]:
             continue
 
         print(f"  ssrCatalog keys: {list(catalog.keys())}")
-        items = catalog.get("items") or catalog.get("products") or []
+        items = (
+            catalog.get("hits") or catalog.get("items")
+            or catalog.get("products") or []
+        )
         if not items:
-            print("  ssrCatalog found but items list is empty")
+            print("  ssrCatalog found but hits/items list is empty")
             continue
 
         print(f"  First item keys: {list(items[0].keys())}")
