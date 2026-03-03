@@ -33,9 +33,10 @@ def _fetch_html() -> str:
         params={
             "api_key": api_key,
             "url": DEALS_URL,
+            "render": "true",
             "country_code": "eg",
         },
-        timeout=70,
+        timeout=120,
     )
     resp.raise_for_status()
     html = resp.text
