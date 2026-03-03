@@ -109,12 +109,6 @@ def _parse_rsc_payload(html: str) -> list[dict]:
             print("  ssrCatalog found but hits/items list is empty")
             continue
 
-        first = items[0]
-        print(f"  First item keys: {list(first.keys())}")
-        # Print URL-relevant fields so we can fix construction
-        for k in ("url", "slug", "url_key", "sku", "id", "name"):
-            if k in first:
-                print(f"  first[{k!r}] = {str(first[k])[:120]!r}")
         results = [p for p in (_normalize_item(i) for i in items) if p]
         if results:
             return results
@@ -162,8 +156,11 @@ def _normalize_item(item: dict) -> dict | None:
         if op > sp:
             discount_pct = round((1 - sp / op) * 100)
 
-    images = item.get("image_keys") or item.get("images") or []
-    image_url = images[0] if images else item.get("image_url") or item.get("image")
+    image_key = item.get("image_key")
+    if not image_key:
+        keys = item.get("image_keys") or []
+        image_key = keys[0] if keys else None
+    image_url = f"https://f.nooncdn.com/p/{image_key}_t300.jpg" if image_key else None
 
     if not all([name, sku, sale_price]):
         return None
