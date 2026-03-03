@@ -63,6 +63,7 @@ def post_deal(product: dict, bot_token: str, channel_id: str) -> bool:
     caption = format_message(product)
 
     async def _run():
+        print(f"  URL: {product.get('affiliate_url')}")
         if product.get("image_url"):
             photo = _download_image(product["image_url"])
             if photo:

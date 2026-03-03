@@ -189,7 +189,7 @@ def _normalize_item(item: dict) -> dict | None:
         "rating": round(float(rating), 1) if rating else None,
         "rating_count": int(rating_count) if rating_count else None,
         "store_name": item.get("store_name") or "",
-        "estimated_delivery": item.get("estimated_delivery_date") or "",
+        "estimated_delivery": re.sub(r"<[^>]+>", "", item.get("estimated_delivery_date") or "").strip(),
     }
 
 
