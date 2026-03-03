@@ -25,36 +25,26 @@ def fetch_products() -> list[dict]:
 
 def _debug_html(html: str) -> None:
     """Print structural clues to help diagnose parsing failures."""
-    print(f"  Page size: {len(html):,} bytes")
-    print(f"  First 300 chars: {html[:300]!r}")
-
     soup = BeautifulSoup(html, "html.parser")
 
-    # Check __NEXT_DATA__
-    tag = soup.find("script", {"id": "__NEXT_DATA__"})
-    if tag:
-        try:
-            data = json.loads(tag.string)
-            def _keys(d, depth=0):
-                if depth > 3 or not isinstance(d, dict):
-                    return
-                for k, v in d.items():
-                    print(f"  {'  ' * depth}[next_data] {k}: {type(v).__name__}" +
-                          (f" len={len(v)}" if isinstance(v, (list, dict)) else ""))
-                    _keys(v, depth + 1)
-            print("  __NEXT_DATA__ structure:")
-            _keys(data)
-        except Exception as e:
-            print(f"  __NEXT_DATA__ parse error: {e}")
-    else:
-        print("  WARNING: no __NEXT_DATA__ script tag found")
+    # All unique data-qa values (first 50)
+    dq = sorted({t.get("data-qa") for t in soup.find_all(attrs={"data-qa": True})})
+    print(f"  data-qa values ({len(dq)}): {dq[:50]}")
 
-    # Check for product-related tags
-    for selector in ["data-qa", "data-testid", "class"]:
-        sample = soup.find(attrs={selector: True})
-        if sample:
-            print(f"  Sample tag with {selector}={sample.get(selector)!r}: <{sample.name}>")
-            break
+    # Large inline scripts (likely contain state/product data)
+    for i, script in enumerate(soup.find_all("script")):
+        text = script.string or ""
+        if len(text) > 5000:
+            print(f"  Script[{i}] {len(text):,} chars — first 200: {text[:200]!r}")
+
+    # window.* state variables
+    for m in re.finditer(r'window\.__?(\w+)\s*=', html[:100000]):
+        print(f"  window var: {m.group(0)[:60]}")
+
+    # Any <script type="application/json"> tags
+    for tag in soup.find_all("script", {"type": "application/json"}):
+        text = tag.string or ""
+        print(f"  JSON script ({len(text):,} chars): {text[:200]!r}")
 
 
 def _fetch_html() -> str:
