@@ -13,7 +13,6 @@ DEALS_URL = (
 def fetch_products() -> list[dict]:
     """Fetch discounted Noon Egypt products via Zenrows (bypasses Akamai)."""
     html = _fetch_html()
-    _debug_html(html)
     products = parse_products_from_html(html)
     if not products:
         raise RuntimeError(
@@ -21,30 +20,6 @@ def fetch_products() -> list[dict]:
             "The page structure may have changed — check raw HTML in logs."
         )
     return products
-
-
-def _debug_html(html: str) -> None:
-    """Print structural clues to help diagnose parsing failures."""
-    soup = BeautifulSoup(html, "html.parser")
-
-    # All unique data-qa values (first 50)
-    dq = sorted({t.get("data-qa") for t in soup.find_all(attrs={"data-qa": True})})
-    print(f"  data-qa values ({len(dq)}): {dq[:50]}")
-
-    # Large inline scripts (likely contain state/product data)
-    for i, script in enumerate(soup.find_all("script")):
-        text = script.string or ""
-        if len(text) > 5000:
-            print(f"  Script[{i}] {len(text):,} chars — first 200: {text[:200]!r}")
-
-    # window.* state variables
-    for m in re.finditer(r'window\.__?(\w+)\s*=', html[:100000]):
-        print(f"  window var: {m.group(0)[:60]}")
-
-    # Any <script type="application/json"> tags
-    for tag in soup.find_all("script", {"type": "application/json"}):
-        text = tag.string or ""
-        print(f"  JSON script ({len(text):,} chars): {text[:200]!r}")
 
 
 def _fetch_html() -> str:
@@ -65,17 +40,138 @@ def _fetch_html() -> str:
     )
     if not resp.ok:
         raise RuntimeError(f"Zenrows error {resp.status_code}: {resp.text[:300]}")
-    html = resp.text
-    print(f"  Fetched {len(html):,} bytes via Zenrows")
-    return html
+    print(f"  Fetched {len(resp.text):,} bytes via Zenrows")
+    return resp.text
 
 
-# ── HTML parsing ──────────────────────────────────────────────────────────────
+# ── Parsing ───────────────────────────────────────────────────────────────────
 
 def parse_products_from_html(html: str) -> list[dict]:
+    # Next.js App Router RSC streaming payload (self.__next_f.push)
+    products = _parse_rsc_payload(html)
+    if products:
+        return products
+    # Legacy Next.js Pages Router (__NEXT_DATA__ script tag)
     products = _parse_next_data(html)
-    return products or _parse_product_cards(html)
+    if products:
+        return products
+    # Last resort: HTML product cards
+    return _parse_product_cards(html)
 
+
+def _parse_rsc_payload(html: str) -> list[dict]:
+    """
+    Parse the Next.js App Router RSC streaming format:
+      self.__next_f.push([1, "CHUNK_ID:JSON_PAYLOAD"])
+    Product data lives under ssrCatalog.items inside one of these chunks.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    decoder = json.JSONDecoder()
+
+    for script in soup.find_all("script"):
+        text = script.string or ""
+        if "ssrCatalog" not in text:
+            continue
+
+        idx = text.find("self.__next_f.push(")
+        if idx < 0:
+            continue
+
+        # Parse the JS array argument as JSON
+        start = idx + len("self.__next_f.push(")
+        try:
+            arr, _ = decoder.raw_decode(text[start:])
+        except json.JSONDecodeError:
+            continue
+
+        if not (isinstance(arr, list) and len(arr) >= 2 and isinstance(arr[1], str)):
+            continue
+
+        raw = arr[1]  # e.g. "29:[["$","$L69",null,{"ssrCatalog":{...}}]]"
+        colon = raw.find(":")
+        if colon < 0:
+            continue
+        try:
+            data = json.loads(raw[colon + 1:])
+        except json.JSONDecodeError:
+            continue
+
+        catalog = _find_key(data, "ssrCatalog")
+        if not catalog:
+            continue
+
+        print(f"  ssrCatalog keys: {list(catalog.keys())}")
+        items = catalog.get("items") or catalog.get("products") or []
+        if not items:
+            print("  ssrCatalog found but items list is empty")
+            continue
+
+        print(f"  First item keys: {list(items[0].keys())}")
+        results = [p for p in (_normalize_item(i) for i in items) if p]
+        if results:
+            return results
+
+    return []
+
+
+def _find_key(data, key):
+    """Recursively find first occurrence of key in nested dicts/lists."""
+    if isinstance(data, dict):
+        if key in data:
+            return data[key]
+        for v in data.values():
+            found = _find_key(v, key)
+            if found is not None:
+                return found
+    elif isinstance(data, list):
+        for item in data:
+            found = _find_key(item, key)
+            if found is not None:
+                return found
+    return None
+
+
+def _normalize_item(item: dict) -> dict | None:
+    name = item.get("name") or item.get("title")
+    sku = item.get("sku") or item.get("id") or item.get("product_id")
+    slug = item.get("slug") or item.get("url_key") or item.get("url") or sku
+
+    sale_price = (
+        item.get("sale_price") or item.get("now_price")
+        or item.get("price") or item.get("selling_price")
+    )
+    original_price = (
+        item.get("price") or item.get("was_price")
+        or item.get("original_price") or item.get("mrp")
+        or sale_price
+    )
+    discount_pct = (
+        item.get("discount") or item.get("discount_percent")
+        or item.get("discount_percentage") or 0
+    )
+    if not discount_pct and original_price and sale_price:
+        op, sp = float(original_price), float(sale_price)
+        if op > sp:
+            discount_pct = round((1 - sp / op) * 100)
+
+    images = item.get("image_keys") or item.get("images") or []
+    image_url = images[0] if images else item.get("image_url") or item.get("image")
+
+    if not all([name, sku, sale_price]):
+        return None
+
+    return {
+        "name": name,
+        "sku": str(sku),
+        "url": f"https://www.noon.com/egypt-en/{slug}/p/{sku}/",
+        "image_url": image_url,
+        "sale_price": float(sale_price),
+        "original_price": float(original_price),
+        "discount_pct": int(discount_pct),
+    }
+
+
+# ── Legacy HTML parsers (kept for tests / fallback) ───────────────────────────
 
 def _parse_next_data(html: str) -> list[dict]:
     soup = BeautifulSoup(html, "html.parser")
@@ -179,34 +275,3 @@ def _extract_items(data: dict) -> list:
         except (KeyError, TypeError):
             continue
     return []
-
-
-def _normalize_item(item: dict) -> dict | None:
-    name = item.get("name") or item.get("title")
-    sku = item.get("sku") or item.get("id")
-    slug = item.get("slug") or item.get("url_key") or sku
-
-    sale_price = item.get("sale_price") or item.get("now_price")
-    original_price = item.get("price") or item.get("was_price") or sale_price
-    discount_pct = item.get("discount") or item.get("discount_percent") or 0
-
-    if not discount_pct and original_price and sale_price:
-        op, sp = float(original_price), float(sale_price)
-        if op > sp:
-            discount_pct = round((1 - sp / op) * 100)
-
-    images = item.get("image_keys") or item.get("images") or []
-    image_url = images[0] if images else None
-
-    if not all([name, sku, sale_price]):
-        return None
-
-    return {
-        "name": name,
-        "sku": str(sku),
-        "url": f"https://www.noon.com/egypt-en/{slug}/p/{sku}/",
-        "image_url": image_url,
-        "sale_price": float(sale_price),
-        "original_price": float(original_price),
-        "discount_pct": int(discount_pct),
-    }
