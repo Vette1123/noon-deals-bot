@@ -4,109 +4,46 @@ import json
 import requests
 from bs4 import BeautifulSoup
 
-CAMPAIGN_CODE = "CMPa5461f39a36enoon"
-PROJECT_CODE = "PRJ496018"
-_BASE = "https://affiliates.noon.partners/_svc/affiliate/affiliate"
-
-# Tried in order until one returns products
-_DEAL_ENDPOINTS = [
-    f"{_BASE}/campaign/{CAMPAIGN_CODE}/products",
-    f"{_BASE}/deals",
-    f"{_BASE}/catalog/products",
-]
+DEALS_URL = (
+    "https://www.noon.com/egypt-en/all-products/"
+    "?f[discount_percent][min]=20&sort[by]=discount_percent&sort[order]=desc"
+)
 
 
-def fetch_products(session_cookie: str = None) -> list[dict]:
-    """
-    Fetch discounted Noon Egypt products via the noon.partners affiliate API.
-    Tries multiple known endpoints; raises RuntimeError if all fail.
-    """
-    if session_cookie is None:
-        session_cookie = os.environ.get("NOON_SESSION_COOKIE", "")
-
-    headers = {
-        "content-type": "application/json",
-        "x-platform": "web",
-        "x-project": PROJECT_CODE,
-        "Cookie": session_cookie,
-    }
-    params = {"country": "EG", "limit": 50, "discount_min": 20}
-
-    for endpoint in _DEAL_ENDPOINTS:
-        try:
-            resp = requests.get(endpoint, headers=headers, params=params, timeout=30)
-            print(f"  {endpoint} → {resp.status_code}")
-            if resp.status_code != 200:
-                continue
-            data = resp.json()
-            products = _normalize_response(data)
-            if products:
-                print(f"  Got {len(products)} products")
-                return products
-        except Exception as e:
-            print(f"  {endpoint} error: {e}")
-
-    raise RuntimeError(
-        "All noon.partners API endpoints failed. "
-        "Check that NOON_SESSION_COOKIE secret is set and not expired."
-    )
-
-
-def _normalize_response(data) -> list[dict]:
-    """Extract product list from various API response shapes."""
-    if isinstance(data, list):
-        items = data
-    else:
-        items = (
-            data.get("products")
-            or data.get("items")
-            or data.get("deals")
-            or data.get("data")
-            or []
+def fetch_products() -> list[dict]:
+    """Fetch discounted Noon Egypt products via ScraperAPI (bypasses Akamai)."""
+    html = _fetch_html()
+    products = parse_products_from_html(html)
+    if not products:
+        raise RuntimeError(
+            "Scraped page returned 0 products. "
+            "The page structure may have changed — check raw HTML in logs."
         )
-        if isinstance(items, dict):
-            items = items.get("items") or items.get("products") or []
-
-    return [p for p in (_normalize_item(i) for i in items) if p]
+    return products
 
 
-def _normalize_item(item: dict) -> dict | None:
-    name = item.get("name") or item.get("title")
-    sku = item.get("sku") or item.get("id") or item.get("product_id")
-    slug = item.get("slug") or item.get("url_key") or sku
+def _fetch_html() -> str:
+    """Fetch Noon deals page via ScraperAPI residential proxy."""
+    api_key = os.environ.get("SCRAPERAPI_KEY", "")
+    if not api_key:
+        raise RuntimeError("SCRAPERAPI_KEY is not set. Add it as a GitHub secret.")
 
-    sale_price = item.get("sale_price") or item.get("now_price") or item.get("price")
-    original_price = (
-        item.get("price")
-        or item.get("was_price")
-        or item.get("original_price")
-        or sale_price
+    resp = requests.get(
+        "http://api.scraperapi.com",
+        params={
+            "api_key": api_key,
+            "url": DEALS_URL,
+            "country_code": "eg",
+        },
+        timeout=70,
     )
-    discount_pct = item.get("discount") or item.get("discount_percent") or 0
-
-    if not discount_pct and original_price and sale_price:
-        op, sp = float(original_price), float(sale_price)
-        if op > sp:
-            discount_pct = round((1 - sp / op) * 100)
-
-    images = item.get("image_keys") or item.get("images") or []
-    image_url = images[0] if images else item.get("image_url") or item.get("image")
-
-    if not all([name, sku, sale_price]):
-        return None
-
-    return {
-        "name": name,
-        "sku": str(sku),
-        "url": f"https://www.noon.com/egypt-en/{slug}/p/{sku}/",
-        "image_url": image_url,
-        "sale_price": float(sale_price),
-        "original_price": float(original_price),
-        "discount_pct": int(discount_pct),
-    }
+    resp.raise_for_status()
+    html = resp.text
+    print(f"  Fetched {len(html):,} bytes via ScraperAPI")
+    return html
 
 
-# ── HTML fallback (kept for existing tests) ───────────────────────────────────
+# ── HTML parsing ──────────────────────────────────────────────────────────────
 
 def parse_products_from_html(html: str) -> list[dict]:
     products = _parse_next_data(html)
@@ -130,7 +67,7 @@ def _parse_product_cards(html: str) -> list[dict]:
     soup = BeautifulSoup(html, "html.parser")
     cards = soup.find_all("div", {"data-qa": "product-block"})
     if not cards:
-        print(f"Warning: no product-block cards found. Page length: {len(html)}")
+        print(f"Warning: no product-block cards found. Page length: {len(html):,}")
         return []
     results = []
     for card in cards:
@@ -152,7 +89,11 @@ def _parse_card(card) -> dict | None:
     sku_match = re.search(r"/p/([A-Z0-9]+)", url)
     sku = sku_match.group(1) if sku_match else None
 
-    name_tag = card.find(attrs={"data-qa": "product-name"}) or card.find("h2") or card.find("h3")
+    name_tag = (
+        card.find(attrs={"data-qa": "product-name"})
+        or card.find("h2")
+        or card.find("h3")
+    )
     name = name_tag.get_text(strip=True) if name_tag else None
 
     sale_tag = card.find(attrs={"data-qa": "product-price"})
@@ -211,3 +152,34 @@ def _extract_items(data: dict) -> list:
         except (KeyError, TypeError):
             continue
     return []
+
+
+def _normalize_item(item: dict) -> dict | None:
+    name = item.get("name") or item.get("title")
+    sku = item.get("sku") or item.get("id")
+    slug = item.get("slug") or item.get("url_key") or sku
+
+    sale_price = item.get("sale_price") or item.get("now_price")
+    original_price = item.get("price") or item.get("was_price") or sale_price
+    discount_pct = item.get("discount") or item.get("discount_percent") or 0
+
+    if not discount_pct and original_price and sale_price:
+        op, sp = float(original_price), float(sale_price)
+        if op > sp:
+            discount_pct = round((1 - sp / op) * 100)
+
+    images = item.get("image_keys") or item.get("images") or []
+    image_url = images[0] if images else None
+
+    if not all([name, sku, sale_price]):
+        return None
+
+    return {
+        "name": name,
+        "sku": str(sku),
+        "url": f"https://www.noon.com/egypt-en/{slug}/p/{sku}/",
+        "image_url": image_url,
+        "sale_price": float(sale_price),
+        "original_price": float(original_price),
+        "discount_pct": int(discount_pct),
+    }

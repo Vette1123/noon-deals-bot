@@ -19,7 +19,7 @@ def run(dry_run: bool = False) -> None:
         raise ValueError("TELEGRAM_BOT_TOKEN is required")
 
     print("Fetching Noon Egypt deals...")
-    products = fetch_products(noon_cookie)
+    products = fetch_products()
     print(f"Found {len(products)} products")
 
     already_posted = load_posted(POSTED_FILE)
