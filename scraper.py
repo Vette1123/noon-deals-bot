@@ -133,9 +133,11 @@ def _find_key(data, key):
 
 def _normalize_item(item: dict) -> dict | None:
     name = item.get("name") or item.get("title")
-    # catalog_sku is the parent product SKU used in noon.com URLs
-    catalog_sku = item.get("catalog_sku") or item.get("sku") or item.get("id")
-    sku = item.get("sku") or catalog_sku
+    # sku_config = parent/configurable SKU (used in noon.com URLs, always ends in "A")
+    # catalog_sku may be variant-specific (ends in "V", "B", etc.) — wrong for URLs
+    sku_config = item.get("sku_config") or item.get("catalog_sku") or item.get("sku") or item.get("id")
+    sku = item.get("sku") or sku_config
+    catalog_sku = sku_config  # alias for rest of function
 
     raw = item.get("url") or item.get("slug") or item.get("url_key") or ""
     slug = re.sub(r"^[a-z]+-[a-z]+/", "", raw) or catalog_sku
