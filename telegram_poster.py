@@ -66,10 +66,26 @@ def post_deal(product: dict, bot_token: str, channel_id: str) -> bool:
     url = product.get("affiliate_url", "")
     markup = _buy_button(url)
 
+    image_url = product.get("image_url")
+
     async def _run():
         print(f"  URL: {url}")
-        if product.get("image_url"):
-            photo = _download_image(product["image_url"])
+        if image_url:
+            # Try 1: pass URL string directly — Telegram fetches it (avoids CDN blocks)
+            try:
+                await bot.send_photo(
+                    chat_id=channel_id,
+                    photo=image_url,
+                    caption=caption,
+                    parse_mode="MarkdownV2",
+                    reply_markup=markup,
+                )
+                return True
+            except Exception as e:
+                print(f"  Direct URL photo failed: {e}")
+
+            # Try 2: download ourselves and upload as bytes
+            photo = _download_image(image_url)
             if photo:
                 try:
                     await bot.send_photo(
@@ -81,7 +97,9 @@ def post_deal(product: dict, bot_token: str, channel_id: str) -> bool:
                     )
                     return True
                 except Exception as e:
-                    print(f"  Photo send failed: {e}")
+                    print(f"  Uploaded photo failed: {e}")
+
+        # Fallback: text only
         await bot.send_message(
             chat_id=channel_id,
             text=caption,
