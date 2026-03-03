@@ -23,24 +23,25 @@ def fetch_products() -> list[dict]:
 
 
 def _fetch_html() -> str:
-    """Fetch Noon deals page via ScraperAPI residential proxy."""
-    api_key = os.environ.get("SCRAPERAPI_KEY", "")
+    """Fetch Noon deals page via Zenrows (Akamai anti-bot bypass)."""
+    api_key = os.environ.get("ZENROWS_API_KEY", "")
     if not api_key:
-        raise RuntimeError("SCRAPERAPI_KEY is not set. Add it as a GitHub secret.")
+        raise RuntimeError("ZENROWS_API_KEY is not set. Add it as a GitHub secret.")
 
     resp = requests.get(
-        "http://api.scraperapi.com",
+        "https://api.zenrows.com/v1/",
         params={
-            "api_key": api_key,
+            "apikey": api_key,
             "url": DEALS_URL,
-            "render": "true",
-            "country_code": "eg",
+            "antibot": "true",
+            "js_render": "true",
         },
         timeout=120,
     )
-    resp.raise_for_status()
+    if not resp.ok:
+        raise RuntimeError(f"Zenrows error {resp.status_code}: {resp.text[:300]}")
     html = resp.text
-    print(f"  Fetched {len(html):,} bytes via ScraperAPI")
+    print(f"  Fetched {len(html):,} bytes via Zenrows")
     return html
 
 

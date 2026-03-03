@@ -28,7 +28,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
           NOON_SESSION_COOKIE: ${{ secrets.NOON_SESSION_COOKIE }}
-          SCRAPERAPI_KEY: ${{ secrets.SCRAPERAPI_KEY }}
+          ZENROWS_API_KEY: ${{ secrets.ZENROWS_API_KEY }}
         run: python main.py
 
       - name: Save posted products
