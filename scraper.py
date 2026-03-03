@@ -10,35 +10,57 @@ DEALS_URL = (
 )
 
 
+MAX_PAGES = 5  # ~245 products per run (5 pages × ~49 each)
+
+
 def fetch_products() -> list[dict]:
-    """Fetch discounted Noon Egypt products via Zenrows (bypasses Akamai)."""
-    html = _fetch_html()
-    products = parse_products_from_html(html)
-    if not products:
+    """Fetch discounted Noon Egypt products across multiple pages via Zenrows."""
+    all_products: list[dict] = []
+    seen_skus: set[str] = set()
+
+    for page in range(1, MAX_PAGES + 1):
+        html = _fetch_html(page)
+        products = parse_products_from_html(html)
+
+        new_count = 0
+        for p in products:
+            if p["sku"] not in seen_skus:
+                seen_skus.add(p["sku"])
+                all_products.append(p)
+                new_count += 1
+
+        print(f"  Page {page}: {len(products)} products ({new_count} new)")
+
+        if new_count == 0:
+            print(f"  No new products on page {page}, stopping.")
+            break
+
+    if not all_products:
         raise RuntimeError(
-            "Scraped page returned 0 products. "
+            "Scraped 0 products across all pages. "
             "The page structure may have changed — check raw HTML in logs."
         )
-    return products
+    return all_products
 
 
-def _fetch_html() -> str:
-    """Fetch Noon deals page via Zenrows (Akamai anti-bot bypass)."""
+def _fetch_html(page: int = 1) -> str:
+    """Fetch a Noon deals page via Zenrows (Akamai anti-bot bypass)."""
     api_key = os.environ.get("ZENROWS_API_KEY", "")
     if not api_key:
         raise RuntimeError("ZENROWS_API_KEY is not set. Add it as a GitHub secret.")
 
-    params = {"apikey": api_key, "url": DEALS_URL, "antibot": "true", "js_render": "true"}
+    url = DEALS_URL if page == 1 else f"{DEALS_URL}&page={page}"
+    params = {"apikey": api_key, "url": url, "antibot": "true", "js_render": "true"}
     resp = requests.get("https://api.zenrows.com/v1/", params=params, timeout=120)
 
     if resp.status_code == 422:
-        print("  Zenrows 422 — retrying with premium proxy...")
+        print(f"  Zenrows 422 on page {page} — retrying with premium proxy...")
         params["premium_proxy"] = "true"
         resp = requests.get("https://api.zenrows.com/v1/", params=params, timeout=120)
 
     if not resp.ok:
         raise RuntimeError(f"Zenrows error {resp.status_code}: {resp.text[:300]}")
-    print(f"  Fetched {len(resp.text):,} bytes via Zenrows")
+    print(f"  Page {page}: fetched {len(resp.text):,} bytes")
     return resp.text
 
 
