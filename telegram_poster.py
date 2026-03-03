@@ -3,6 +3,7 @@ import re
 import requests
 from io import BytesIO
 import telegram
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 
 def _escape_md2(text: str) -> str:
@@ -15,7 +16,6 @@ def format_message(product: dict) -> str:
     sale = _escape_md2(f"{product['sale_price']:,.0f}")
     orig = _escape_md2(f"{product['original_price']:,.0f}")
     disc = _escape_md2(f"{product['discount_pct']}%")
-    url  = product["affiliate_url"]
 
     lines = [f"🔥 *{name}*"]
 
@@ -38,10 +38,11 @@ def format_message(product: dict) -> str:
     if product.get("store_name"):
         lines.append(f"🏪 {_escape_md2(product['store_name'])}")
 
-    lines.append("")
-    lines.append(f"🛒 [اشتري دلوقتي]({url})")
-
     return "\n".join(lines)
+
+
+def _buy_button(url: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton("🛒 اشتري دلوقتي", url=url)]])
 
 
 def _download_image(url: str) -> BytesIO | None:
@@ -62,8 +63,11 @@ def post_deal(product: dict, bot_token: str, channel_id: str) -> bool:
     bot = telegram.Bot(token=bot_token)
     caption = format_message(product)
 
+    url = product.get("affiliate_url", "")
+    markup = _buy_button(url)
+
     async def _run():
-        print(f"  URL: {product.get('affiliate_url')}")
+        print(f"  URL: {url}")
         if product.get("image_url"):
             photo = _download_image(product["image_url"])
             if photo:
@@ -73,11 +77,17 @@ def post_deal(product: dict, bot_token: str, channel_id: str) -> bool:
                         photo=photo,
                         caption=caption,
                         parse_mode="MarkdownV2",
+                        reply_markup=markup,
                     )
                     return True
                 except Exception as e:
                     print(f"  Photo send failed: {e}")
-        await bot.send_message(chat_id=channel_id, text=caption, parse_mode="MarkdownV2")
+        await bot.send_message(
+            chat_id=channel_id,
+            text=caption,
+            parse_mode="MarkdownV2",
+            reply_markup=markup,
+        )
         return True
 
     try:

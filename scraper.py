@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup
 
 DEALS_URL = (
     "https://www.noon.com/egypt-en/all-products/"
-    "?f[discount_percent][min]=20&sort[by]=discount_percent&sort[order]=desc"
+    "?f[discount_percent][min]=15&sort[by]=discount_percent&sort[order]=desc"
 )
 
 

@@ -1,7 +1,7 @@
 import json
 import os
 
-MIN_DISCOUNT = 20
+MIN_DISCOUNT = 15
 
 def filter_deals(products: list[dict], already_posted: dict, min_discount: int = MIN_DISCOUNT) -> list[dict]:
     return [p for p in products if p.get("discount_pct", 0) >= min_discount and p["sku"] not in already_posted]
