@@ -1,7 +1,7 @@
 import os
 import sys
 import time
-from scraper import fetch_deals_page, parse_products_from_html
+from scraper import fetch_products
 from filters import filter_deals, load_posted, save_posted
 from affiliate import build_affiliate_link
 from telegram_poster import post_deal
@@ -19,8 +19,7 @@ def run(dry_run: bool = False) -> None:
         raise ValueError("TELEGRAM_BOT_TOKEN is required")
 
     print("Fetching Noon Egypt deals...")
-    html = fetch_deals_page()
-    products = parse_products_from_html(html)
+    products = fetch_products(noon_cookie)
     print(f"Found {len(products)} products")
 
     already_posted = load_posted(POSTED_FILE)
