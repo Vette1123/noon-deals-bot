@@ -7,7 +7,7 @@ from affiliate import build_affiliate_link
 from telegram_poster import post_deal
 
 POSTED_FILE = "posted.json"
-MAX_POSTS_PER_RUN = 20
+MAX_POSTS_PER_RUN = 30
 DELAY_BETWEEN_POSTS = 3
 
 def run(dry_run: bool = False) -> None:
