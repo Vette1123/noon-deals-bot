@@ -37,10 +37,7 @@ def fetch_products(start_page: int = 1) -> list[dict]:
             break
 
     if not all_products:
-        raise RuntimeError(
-            "Scraped 0 products. "
-            "The page structure may have changed — check raw HTML in logs."
-        )
+        print("Warning: Scraped 0 products. Page structure may have changed or we reached the end.")
     return all_products
 
 
@@ -80,59 +77,77 @@ def parse_products_from_html(html: str) -> list[dict]:
     return _parse_product_cards(html)
 
 
+_CATALOG_KEYS = ("ssrCatalog", "catalogData", "ssrProductList", "productList", "catalog")
+_ITEMS_KEYS   = ("hits", "items", "products", "results")
+
+
+def _extract_catalog_items(data) -> list:
+    """Try all known catalog wrapper keys, return first non-empty items list."""
+    for catalog_key in _CATALOG_KEYS:
+        catalog = _find_key(data, catalog_key)
+        if not catalog:
+            continue
+        print(f"  Found catalog key '{catalog_key}': {list(catalog.keys()) if isinstance(catalog, dict) else type(catalog)}")
+        if isinstance(catalog, list):
+            return catalog
+        for items_key in _ITEMS_KEYS:
+            items = catalog.get(items_key)
+            if items:
+                return items
+        print(f"  '{catalog_key}' found but none of {_ITEMS_KEYS} had data")
+    return []
+
+
+def _parse_rsc_chunk(raw: str) -> list[dict]:
+    """Parse one RSC chunk string (everything after the colon) for products."""
+    decoder = json.JSONDecoder()
+    colon = raw.find(":")
+    if colon < 0:
+        return []
+    try:
+        data = json.loads(raw[colon + 1:])
+    except json.JSONDecodeError:
+        return []
+    items = _extract_catalog_items(data)
+    if not items:
+        return []
+    results = [p for p in (_normalize_item(i) for i in items) if p]
+    return results
+
+
 def _parse_rsc_payload(html: str) -> list[dict]:
     """
     Parse the Next.js App Router RSC streaming format:
       self.__next_f.push([1, "CHUNK_ID:JSON_PAYLOAD"])
-    Product data lives under ssrCatalog.items inside one of these chunks.
+    Product data lives under a catalog key inside one of these chunks.
     """
     soup = BeautifulSoup(html, "html.parser")
     decoder = json.JSONDecoder()
 
+    # Collect all RSC push chunks that might contain product data
+    candidate_chunks: list[str] = []
     for script in soup.find_all("script"):
         text = script.string or ""
-        if "ssrCatalog" not in text:
-            continue
-
         idx = text.find("self.__next_f.push(")
         if idx < 0:
             continue
-
-        # Parse the JS array argument as JSON
         start = idx + len("self.__next_f.push(")
         try:
             arr, _ = decoder.raw_decode(text[start:])
         except json.JSONDecodeError:
             continue
-
         if not (isinstance(arr, list) and len(arr) >= 2 and isinstance(arr[1], str)):
             continue
+        raw = arr[1]
+        # Check for any catalog-related keyword before doing heavier parsing
+        if any(k in raw for k in _CATALOG_KEYS):
+            results = _parse_rsc_chunk(raw)
+            if results:
+                return results
+            candidate_chunks.append(raw[:120])  # keep snippet for debug
 
-        raw = arr[1]  # e.g. "29:[["$","$L69",null,{"ssrCatalog":{...}}]]"
-        colon = raw.find(":")
-        if colon < 0:
-            continue
-        try:
-            data = json.loads(raw[colon + 1:])
-        except json.JSONDecodeError:
-            continue
-
-        catalog = _find_key(data, "ssrCatalog")
-        if not catalog:
-            continue
-
-        print(f"  ssrCatalog keys: {list(catalog.keys())}")
-        items = (
-            catalog.get("hits") or catalog.get("items")
-            or catalog.get("products") or []
-        )
-        if not items:
-            print("  ssrCatalog found but hits/items list is empty")
-            continue
-
-        results = [p for p in (_normalize_item(i) for i in items) if p]
-        if results:
-            return results
+    if candidate_chunks:
+        print(f"  RSC chunks with catalog keys found but no products extracted. Snippets: {candidate_chunks[:3]}")
 
     return []
 

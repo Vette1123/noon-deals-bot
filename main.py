@@ -40,6 +40,11 @@ def run(dry_run: bool = False) -> None:
     products = fetch_products(start_page=start_page)
     print(f"Found {len(products)} products")
 
+    if not products:
+        print("No products found — resetting page cursor to 1 for next run.")
+        _save_state({"next_page": 1})
+        return
+
     already_posted = load_posted(POSTED_FILE)
     new_deals = filter_deals(products, already_posted)
     print(f"{len(new_deals)} new qualifying deals (>={MIN_DISCOUNT}% off)")
