@@ -35,6 +35,44 @@ def _noon_login(email: str, password: str) -> str:
     return token
 
 
+_TELEGRAM_API = "https://api.telegram.org/bot{token}/{method}"
+
+
+def _send_otp_prompt(bot_token: str, admin_chat_id: str) -> None:
+    """Send a Telegram DM to the admin requesting the OTP."""
+    url = _TELEGRAM_API.format(token=bot_token, method="sendMessage")
+    requests.post(url, json={
+        "chat_id": admin_chat_id,
+        "text": "Noon session expired. Reply here with the OTP from your email to refresh it.",
+    }, timeout=10)
+
+
+def _poll_for_otp(bot_token: str, admin_chat_id: str, timeout: int = 180) -> str:
+    """
+    Long-poll Telegram getUpdates until admin replies with a message.
+    Returns the OTP text. Raises AuthError if timeout exceeded.
+    """
+    url = _TELEGRAM_API.format(token=bot_token, method="getUpdates")
+    offset = 0
+    deadline = time.time() + timeout
+
+    while time.time() < deadline:
+        resp = requests.get(url, params={"offset": offset, "timeout": 30}, timeout=35)
+        if not resp.ok:
+            time.sleep(3)
+            continue
+
+        for update in resp.json().get("result", []):
+            offset = update["update_id"] + 1
+            msg = update.get("message", {})
+            sender_id = str(msg.get("from", {}).get("id", ""))
+            text = msg.get("text", "").strip()
+            if sender_id == str(admin_chat_id) and text:
+                return text
+
+    raise AuthError("OTP timed out — no reply received within 3 minutes")
+
+
 def re_authenticate() -> str:
     """
     Full re-auth flow. Returns new _npsid cookie string.
