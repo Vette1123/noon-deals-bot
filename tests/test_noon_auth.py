@@ -1,27 +1,84 @@
-from noon_auth import AuthError, re_authenticate
 import base64
-import responses as rsps
 import pytest
-from noon_auth import _noon_login, AuthError, _LOGIN_URL
+import responses as rsps
 from unittest.mock import patch, MagicMock
-from noon_auth import _send_otp_prompt, _poll_for_otp
-from noon_auth import _noon_verify, _VERIFY_URL
-from noon_auth import _update_github_secret
+
+from noon_auth import (
+    AuthError,
+    re_authenticate,
+    _generate_pkce_params,
+    _request_otp,
+    _validate_otp,
+    _create_session,
+    _OTP_GENERATE_URL,
+    _OTP_VALIDATE_URL,
+    _SESSION_CREATE_URL,
+    _send_otp_prompt,
+    _poll_for_otp,
+    _update_github_secret,
+)
+
+
+# ── _generate_pkce_params ─────────────────────────────────────────────────────
+
+def test_generate_pkce_params_format():
+    cv, pk = _generate_pkce_params()
+    assert len(cv) > 80  # base64url of 96 bytes
+    assert "=" not in cv  # no padding
+    assert pk.startswith("pkce:web:")
+    assert len(pk) == len("pkce:web:") + 10
+
+
+# ── _request_otp ──────────────────────────────────────────────────────────────
+
+@rsps.activate
+def test_request_otp_succeeds():
+    rsps.add(rsps.POST, _OTP_GENERATE_URL, json={"status": "ok"}, status=200)
+    # should not raise
+    _request_otp("user123", "verifier", "pkce:web:abc")
 
 
 @rsps.activate
-def test_noon_login_returns_token():
-    rsps.add(rsps.POST, _LOGIN_URL, json={"token": "tok_abc123"}, status=200)
-    token = _noon_login("user@example.com", "s3cr3t")
-    assert token == "tok_abc123"
+def test_request_otp_raises_on_failure():
+    rsps.add(rsps.POST, _OTP_GENERATE_URL, json={"error": "bad"}, status=400)
+    with pytest.raises(AuthError, match="OTP generation failed"):
+        _request_otp("user123", "verifier", "pkce:web:abc")
+
+
+# ── _validate_otp ─────────────────────────────────────────────────────────────
+
+@rsps.activate
+def test_validate_otp_returns_access_token():
+    rsps.add(rsps.POST, _OTP_VALIDATE_URL, json={"accessToken": "nav1.public.abc"}, status=200)
+    token = _validate_otp("user123", "user@example.com", "123456", "verifier", "pkce:web:abc")
+    assert token == "nav1.public.abc"
 
 
 @rsps.activate
-def test_noon_login_raises_on_failure():
-    rsps.add(rsps.POST, _LOGIN_URL, json={"error": "invalid"}, status=401)
-    with pytest.raises(AuthError, match="Login failed"):
-        _noon_login("user@example.com", "wrong")
+def test_validate_otp_raises_on_missing_token():
+    rsps.add(rsps.POST, _OTP_VALIDATE_URL, json={"status": "ok"}, status=200)
+    with pytest.raises(AuthError, match="accessToken"):
+        _validate_otp("user123", "user@example.com", "123456", "verifier", "pkce:web:abc")
 
+
+# ── _create_session ───────────────────────────────────────────────────────────
+
+@rsps.activate
+def test_create_session_returns_npsid():
+    rsps.add(rsps.POST, _SESSION_CREATE_URL, json={"status": "ok"}, status=200,
+             headers={"Set-Cookie": "_npsid=fresh123; Path=/; HttpOnly"})
+    result = _create_session("user123", "nav1.public.abc", "verifier", "pkce:web:abc")
+    assert result == "_npsid=fresh123"
+
+
+@rsps.activate
+def test_create_session_raises_when_no_npsid():
+    rsps.add(rsps.POST, _SESSION_CREATE_URL, json={"status": "ok"}, status=200)
+    with pytest.raises(AuthError, match="_npsid"):
+        _create_session("user123", "nav1.public.abc", "verifier", "pkce:web:abc")
+
+
+# ── _send_otp_prompt ──────────────────────────────────────────────────────────
 
 def test_send_otp_prompt_calls_telegram():
     with patch("noon_auth.requests.post") as mock_post:
@@ -32,6 +89,8 @@ def test_send_otp_prompt_calls_telegram():
         assert "bot_token_123" in call_url
         assert "sendMessage" in call_url
 
+
+# ── _poll_for_otp ─────────────────────────────────────────────────────────────
 
 def test_poll_for_otp_returns_first_reply():
     updates = {
@@ -62,24 +121,7 @@ def test_poll_for_otp_raises_on_timeout():
                 _poll_for_otp("bot_token_123", admin_chat_id="99", timeout=10)
 
 
-@rsps.activate
-def test_noon_verify_extracts_npsid():
-    rsps.add(
-        rsps.POST, _VERIFY_URL,
-        json={"status": "ok"},
-        status=200,
-        headers={"Set-Cookie": "_npsid=newcookie99; Path=/; HttpOnly"},
-    )
-    cookie = _noon_verify("123456", "tok_abc123")
-    assert cookie == "_npsid=newcookie99"
-
-
-@rsps.activate
-def test_noon_verify_raises_when_no_cookie():
-    rsps.add(rsps.POST, _VERIFY_URL, json={"status": "ok"}, status=200)
-    with pytest.raises(AuthError, match="_npsid"):
-        _noon_verify("123456", "tok_abc123")
-
+# ── _update_github_secret ─────────────────────────────────────────────────────
 
 def test_update_github_secret_calls_api():
     pub_key_resp = {"key_id": "key123", "key": base64.b64encode(b"A" * 32).decode()}
@@ -103,30 +145,29 @@ def test_update_github_secret_calls_api():
         assert "encrypted_value" in put_body
 
 
+# ── re_authenticate ───────────────────────────────────────────────────────────
+
 def test_re_authenticate_full_flow(monkeypatch):
     monkeypatch.setenv("NOON_EMAIL", "user@example.com")
-    monkeypatch.setenv("NOON_PASSWORD", "pass123")
+    monkeypatch.setenv("NOON_USER_CODE", "prd-abc@idp.noon.partners")
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "bot:TOKEN")
     monkeypatch.setenv("TELEGRAM_ADMIN_CHAT_ID", "99")
     monkeypatch.setenv("GH_PAT", "ghp_test")
     monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
 
-    with patch("noon_auth._noon_login", return_value="tok_abc") as mock_login, \
+    with patch("noon_auth._generate_pkce_params", return_value=("cv123", "pkce:web:XYZ")), \
+         patch("noon_auth._request_otp") as mock_req_otp, \
          patch("noon_auth._send_otp_prompt") as mock_prompt, \
-         patch("noon_auth._poll_for_otp", return_value="123456") as mock_poll, \
-         patch("noon_auth._noon_verify", return_value="_npsid=fresh99") as mock_verify, \
+         patch("noon_auth._poll_for_otp", return_value="654321") as mock_poll, \
+         patch("noon_auth._validate_otp", return_value="nav1.public.TOKEN") as mock_validate, \
+         patch("noon_auth._create_session", return_value="_npsid=fresh99") as mock_session, \
          patch("noon_auth._update_github_secret") as mock_update:
 
         result = re_authenticate()
 
     assert result == "_npsid=fresh99"
-    mock_login.assert_called_once_with("user@example.com", "pass123")
+    mock_req_otp.assert_called_once_with("prd-abc@idp.noon.partners", "cv123", "pkce:web:XYZ")
     mock_prompt.assert_called_once_with("bot:TOKEN", "99")
     mock_poll.assert_called_once_with("bot:TOKEN", "99", timeout=180)
-    mock_verify.assert_called_once_with("123456", "tok_abc")
-    mock_update.assert_called_once_with(
-        secret_name="NOON_SESSION_COOKIE",
-        value="_npsid=fresh99",
-        pat="ghp_test",
-        repo="owner/repo",
-    )
+    mock_validate.assert_called_once_with("prd-abc@idp.noon.partners", "user@example.com", "654321", "cv123", "pkce:web:XYZ")
+    mock_session.assert_called_once_with("prd-abc@idp.noon.partners", "nav1.public.TOKEN", "cv123", "pkce:web:XYZ")

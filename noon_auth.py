@@ -1,5 +1,7 @@
 import os
 import base64
+import secrets
+import string
 import time
 import requests
 import nacl.public
@@ -11,34 +13,105 @@ class AuthError(Exception):
     pass
 
 
-# ── Fill these in after browser devtools endpoint discovery ────────────────
-_LOGIN_URL  = "https://affiliates.noon.partners/auth/login"   # TODO: confirm
-_VERIFY_URL = "https://affiliates.noon.partners/auth/verify"  # TODO: confirm
-# ──────────────────────────────────────────────────────────────────────────
+_OTP_GENERATE_URL  = "https://login.noon.partners/_svc/mp-partner-identity/public/user/credential/generate"
+_OTP_VALIDATE_URL  = "https://login.noon.partners/_svc/mp-partner-identity/public/user/validate"
+_SESSION_CREATE_URL = "https://login.noon.partners/_svc/mp-partner-identity/public/user/session/create"
+_PROJECT_CODE = "PRJ496018"
+
+_HEADERS = {
+    "content-type": "application/json",
+    "x-platform": "web",
+    "origin": "https://login.noon.partners",
+}
+
+_TELEGRAM_API = "https://api.telegram.org/bot{token}/{method}"
 
 
-def _noon_login(email: str, password: str) -> str:
-    """POST credentials. Returns intermediate token string."""
+def _generate_pkce_params() -> tuple:
+    """Generate a fresh (code_verifier, pkce_key) pair for PKCE flow."""
+    code_verifier = base64.urlsafe_b64encode(secrets.token_bytes(96)).rstrip(b"=").decode()
+    chars = string.ascii_letters + string.digits
+    pkce_key = "pkce:web:" + "".join(secrets.choice(chars) for _ in range(10))
+    return code_verifier, pkce_key
+
+
+def _request_otp(user_code: str, code_verifier: str, pkce_key: str) -> None:
+    """Step 1: Request OTP — noon sends OTP to the user's registered email."""
     try:
         resp = requests.post(
-            _LOGIN_URL,
-            json={"email": email, "password": password},
-            headers={"content-type": "application/json", "x-platform": "web"},
+            _OTP_GENERATE_URL,
+            json={
+                "channelCode": "emailotp",
+                "userCode": user_code,
+                "client_code": "web",
+                "code_verifier": code_verifier,
+                "pkce_key": pkce_key,
+            },
+            headers=_HEADERS,
             timeout=15,
         )
         resp.raise_for_status()
     except requests.HTTPError:
-        raise AuthError(f"Login failed: {resp.status_code} {resp.text}")
+        raise AuthError(f"OTP generation failed: {resp.status_code} {resp.text}")
     except requests.RequestException as e:
-        raise AuthError(f"Login request failed: {e}")
-
-    token = resp.json().get("token")
-    if not token:
-        raise AuthError(f"Login response missing token: {resp.text}")
-    return token
+        raise AuthError(f"OTP generation request failed: {e}")
 
 
-_TELEGRAM_API = "https://api.telegram.org/bot{token}/{method}"
+def _validate_otp(user_code: str, email: str, otp: str, code_verifier: str, pkce_key: str) -> str:
+    """Step 2: Validate OTP. Returns the accessToken string."""
+    try:
+        resp = requests.post(
+            _OTP_VALIDATE_URL,
+            json={
+                "channel_code": "emailotp",
+                "user_code": user_code,
+                "channel_identifier": email,
+                "channel_credential": otp,
+                "client_code": "web",
+                "code_verifier": code_verifier,
+                "pkce_key": pkce_key,
+            },
+            headers=_HEADERS,
+            timeout=15,
+        )
+        resp.raise_for_status()
+    except requests.HTTPError:
+        raise AuthError(f"OTP validation failed: {resp.status_code} {resp.text}")
+    except requests.RequestException as e:
+        raise AuthError(f"OTP validation request failed: {e}")
+
+    access_token = resp.json().get("accessToken")
+    if not access_token:
+        raise AuthError(f"OTP validation response missing accessToken: {resp.text}")
+    return access_token
+
+
+def _create_session(user_code: str, access_token: str, code_verifier: str, pkce_key: str) -> str:
+    """Step 3: Create session. Returns '_npsid=<value>'."""
+    try:
+        resp = requests.post(
+            _SESSION_CREATE_URL,
+            json={
+                "userCode": user_code,
+                "accessToken": access_token,
+                "projectCode": _PROJECT_CODE,
+                "clientCode": "web",
+                "code_verifier": code_verifier,
+                "pkce_key": pkce_key,
+            },
+            headers=_HEADERS,
+            timeout=15,
+        )
+        resp.raise_for_status()
+    except requests.HTTPError:
+        raise AuthError(f"Session creation failed: {resp.status_code} {resp.text}")
+    except requests.RequestException as e:
+        raise AuthError(f"Session creation request failed: {e}")
+
+    npsid_value = resp.cookies.get("_npsid")
+    if not npsid_value:
+        raise AuthError(f"_npsid not found in response cookies: {dict(resp.cookies)}")
+    return f"_npsid={npsid_value}"
 
 
 def _send_otp_prompt(bot_token: str, admin_chat_id: str) -> None:
@@ -76,28 +149,6 @@ def _poll_for_otp(bot_token: str, admin_chat_id: str, timeout: int = 180) -> str
     raise AuthError("OTP timed out — no reply received within 3 minutes")
 
 
-def _noon_verify(otp: str, token: str) -> str:
-    """POST OTP + token, extract _npsid from Set-Cookie. Returns '_npsid=<value>'."""
-    try:
-        resp = requests.post(
-            _VERIFY_URL,
-            json={"otp": otp, "token": token},
-            headers={"content-type": "application/json", "x-platform": "web"},
-            timeout=15,
-        )
-        resp.raise_for_status()
-    except requests.HTTPError:
-        raise AuthError(f"OTP verification failed: {resp.status_code} {resp.text}")
-    except requests.RequestException as e:
-        raise AuthError(f"OTP verify request failed: {e}")
-
-    # Extract _npsid from response cookies (handles multiple Set-Cookie headers)
-    npsid_value = resp.cookies.get("_npsid")
-    if not npsid_value:
-        raise AuthError(f"_npsid not found in response cookies: {dict(resp.cookies)}")
-    return f"_npsid={npsid_value}"
-
-
 def _update_github_secret(secret_name: str, value: str, pat: str, repo: str) -> None:
     """Encrypt value with repo public key and PUT to GitHub Secrets API."""
     headers = {
@@ -133,33 +184,38 @@ def _update_github_secret(secret_name: str, value: str, pat: str, repo: str) -> 
 
 def re_authenticate() -> str:
     """
-    Full re-auth flow. Returns new _npsid cookie string.
+    Full re-auth flow using 3-step PKCE login. Returns new _npsid cookie string.
 
     Reads from environment:
-        NOON_EMAIL, NOON_PASSWORD
+        NOON_EMAIL, NOON_USER_CODE
         TELEGRAM_BOT_TOKEN, TELEGRAM_ADMIN_CHAT_ID
         GH_PAT, GITHUB_REPOSITORY (auto-set by Actions as "owner/repo")
 
     Raises AuthError on any failure.
     """
-    email    = os.environ["NOON_EMAIL"]
-    password = os.environ["NOON_PASSWORD"]
-    bot_token      = os.environ["TELEGRAM_BOT_TOKEN"]
-    admin_chat_id  = os.environ["TELEGRAM_ADMIN_CHAT_ID"]
-    gh_pat   = os.environ["GH_PAT"]
-    gh_repo  = os.environ["GITHUB_REPOSITORY"]
+    email         = os.environ["NOON_EMAIL"]
+    user_code     = os.environ["NOON_USER_CODE"]
+    bot_token     = os.environ["TELEGRAM_BOT_TOKEN"]
+    admin_chat_id = os.environ["TELEGRAM_ADMIN_CHAT_ID"]
+    gh_pat        = os.environ["GH_PAT"]
+    gh_repo       = os.environ["GITHUB_REPOSITORY"]
 
     print("  [noon_auth] Session expired — starting re-authentication flow")
 
-    token = _noon_login(email, password)
-    print("  [noon_auth] Login submitted — waiting for OTP from admin via Telegram")
+    code_verifier, pkce_key = _generate_pkce_params()
+
+    _request_otp(user_code, code_verifier, pkce_key)
+    print("  [noon_auth] OTP requested — waiting for OTP from admin via Telegram")
 
     _send_otp_prompt(bot_token, admin_chat_id)
     otp = _poll_for_otp(bot_token, admin_chat_id, timeout=180)
-    print("  [noon_auth] OTP received — verifying")
+    print("  [noon_auth] OTP received — validating")
 
-    new_cookie = _noon_verify(otp, token)
-    print(f"  [noon_auth] New session cookie obtained")
+    access_token = _validate_otp(user_code, email, otp, code_verifier, pkce_key)
+    print("  [noon_auth] OTP validated — creating session")
+
+    new_cookie = _create_session(user_code, access_token, code_verifier, pkce_key)
+    print("  [noon_auth] New session cookie obtained")
 
     try:
         _update_github_secret(
