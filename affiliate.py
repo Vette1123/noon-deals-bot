@@ -56,6 +56,8 @@ def build_affiliate_link(product_url: str, product_name: str, session_cookie: st
             print("  Affiliate API 401 — attempting session refresh")
             try:
                 new_cookie = re_authenticate()
+                # Propagate into env so subsequent products skip re-auth entirely
+                os.environ["NOON_SESSION_COOKIE"] = new_cookie
                 return build_affiliate_link(product_url, product_name, session_cookie=new_cookie, _retried=True)
             except (AuthError, AffiliateError) as reauth_err:
                 raise AffiliateError(f"Re-auth failed: {reauth_err}") from reauth_err

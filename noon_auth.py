@@ -13,6 +13,12 @@ class AuthError(Exception):
     pass
 
 
+# In-process cache: prevents spamming admin with multiple OTP requests
+# if several products fail with 401 in the same run.
+_cached_cookie: str | None = None
+_reauth_attempted: bool = False
+
+
 _OTP_GENERATE_URL  = "https://login.noon.partners/_svc/mp-partner-identity/public/user/credential/generate"
 _OTP_VALIDATE_URL  = "https://login.noon.partners/_svc/mp-partner-identity/public/user/validate"
 _SESSION_CREATE_URL = "https://login.noon.partners/_svc/mp-partner-identity/public/user/session/create"
@@ -193,6 +199,22 @@ def re_authenticate() -> str:
 
     Raises AuthError on any failure.
     """
+    global _cached_cookie, _reauth_attempted
+
+    # Return cached cookie if we already re-authed this run (avoids spamming admin)
+    if _cached_cookie:
+        print("  [noon_auth] Returning cached session cookie from this run")
+        return _cached_cookie
+
+    # Hard stop: don't attempt re-auth a second time if the first attempt failed.
+    # Re-trying would request another OTP email and confuse the admin.
+    if _reauth_attempted:
+        raise AuthError(
+            "Re-authentication already attempted this run — refusing to request another OTP"
+        )
+
+    _reauth_attempted = True
+
     email         = os.environ["NOON_EMAIL"]
     user_code     = os.environ["NOON_USER_CODE"]
     bot_token     = os.environ["TELEGRAM_BOT_TOKEN"]
@@ -227,4 +249,5 @@ def re_authenticate() -> str:
     except Exception as e:
         print(f"  [noon_auth] Warning: could not update GitHub secret: {e}")
 
+    _cached_cookie = new_cookie
     return new_cookie
