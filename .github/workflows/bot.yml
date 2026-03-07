@@ -29,6 +29,10 @@ jobs:
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
           NOON_SESSION_COOKIE: ${{ secrets.NOON_SESSION_COOKIE }}
           ZENROWS_API_KEY: ${{ secrets.ZENROWS_API_KEY }}
+          NOON_EMAIL: ${{ secrets.NOON_EMAIL }}
+          NOON_PASSWORD: ${{ secrets.NOON_PASSWORD }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+          GH_PAT: ${{ secrets.GH_PAT }}
         run: python main.py
 
       - name: Save posted products
