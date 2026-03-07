@@ -91,14 +91,11 @@ def _noon_verify(otp: str, token: str) -> str:
     except requests.RequestException as e:
         raise AuthError(f"OTP verify request failed: {e}")
 
-    # Extract _npsid from Set-Cookie header
-    set_cookie = resp.headers.get("Set-Cookie", "")
-    for part in set_cookie.split(";"):
-        part = part.strip()
-        if part.startswith("_npsid="):
-            return part  # e.g. "_npsid=6a47b96536734d769711874c914cce55"
-
-    raise AuthError(f"_npsid not found in Set-Cookie: {set_cookie!r}")
+    # Extract _npsid from response cookies (handles multiple Set-Cookie headers)
+    npsid_value = resp.cookies.get("_npsid")
+    if not npsid_value:
+        raise AuthError(f"_npsid not found in response cookies: {dict(resp.cookies)}")
+    return f"_npsid={npsid_value}"
 
 
 def _update_github_secret(secret_name: str, value: str, pat: str, repo: str) -> None:
