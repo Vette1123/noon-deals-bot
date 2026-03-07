@@ -1,10 +1,12 @@
 from noon_auth import AuthError, re_authenticate
+import base64
 import responses as rsps
 import pytest
 from noon_auth import _noon_login, AuthError, _LOGIN_URL
 from unittest.mock import patch, MagicMock
 from noon_auth import _send_otp_prompt, _poll_for_otp
 from noon_auth import _noon_verify, _VERIFY_URL
+from noon_auth import _update_github_secret
 
 
 @rsps.activate
@@ -77,3 +79,25 @@ def test_noon_verify_raises_when_no_cookie():
     rsps.add(rsps.POST, _VERIFY_URL, json={"status": "ok"}, status=200)
     with pytest.raises(AuthError, match="_npsid"):
         _noon_verify("123456", "tok_abc123")
+
+
+def test_update_github_secret_calls_api():
+    pub_key_resp = {"key_id": "key123", "key": base64.b64encode(b"A" * 32).decode()}
+
+    with patch("noon_auth.requests.get") as mock_get, \
+         patch("noon_auth.requests.put") as mock_put:
+        mock_get.return_value = MagicMock(ok=True, json=lambda: pub_key_resp)
+        mock_put.return_value = MagicMock(status_code=204)
+
+        _update_github_secret(
+            secret_name="NOON_SESSION_COOKIE",
+            value="_npsid=abc123",
+            pat="ghp_test",
+            repo="owner/repo",
+        )
+
+        mock_get.assert_called_once()
+        mock_put.assert_called_once()
+        put_body = mock_put.call_args[1]["json"]
+        assert put_body["key_id"] == "key123"
+        assert "encrypted_value" in put_body
