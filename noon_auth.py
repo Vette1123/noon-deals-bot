@@ -73,6 +73,31 @@ def _poll_for_otp(bot_token: str, admin_chat_id: str, timeout: int = 180) -> str
     raise AuthError("OTP timed out — no reply received within 3 minutes")
 
 
+def _noon_verify(otp: str, token: str) -> str:
+    """POST OTP + token, extract _npsid from Set-Cookie. Returns '_npsid=<value>'."""
+    try:
+        resp = requests.post(
+            _VERIFY_URL,
+            json={"otp": otp, "token": token},
+            headers={"content-type": "application/json", "x-platform": "web"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+    except requests.HTTPError:
+        raise AuthError(f"OTP verification failed: {resp.status_code} {resp.text}")
+    except requests.RequestException as e:
+        raise AuthError(f"OTP verify request failed: {e}")
+
+    # Extract _npsid from Set-Cookie header
+    set_cookie = resp.headers.get("Set-Cookie", "")
+    for part in set_cookie.split(";"):
+        part = part.strip()
+        if part.startswith("_npsid="):
+            return part  # e.g. "_npsid=6a47b96536734d769711874c914cce55"
+
+    raise AuthError(f"_npsid not found in Set-Cookie: {set_cookie!r}")
+
+
 def re_authenticate() -> str:
     """
     Full re-auth flow. Returns new _npsid cookie string.

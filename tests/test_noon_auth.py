@@ -4,6 +4,7 @@ import pytest
 from noon_auth import _noon_login, AuthError, _LOGIN_URL
 from unittest.mock import patch, MagicMock
 from noon_auth import _send_otp_prompt, _poll_for_otp
+from noon_auth import _noon_verify, _VERIFY_URL
 
 
 @rsps.activate
@@ -57,3 +58,22 @@ def test_poll_for_otp_raises_on_timeout():
         with patch("noon_auth.time.time", side_effect=[0, 0, 5, 5, 11]):
             with pytest.raises(AuthError, match="timed out"):
                 _poll_for_otp("bot_token_123", admin_chat_id="99", timeout=10)
+
+
+@rsps.activate
+def test_noon_verify_extracts_npsid():
+    rsps.add(
+        rsps.POST, _VERIFY_URL,
+        json={"status": "ok"},
+        status=200,
+        headers={"Set-Cookie": "_npsid=newcookie99; Path=/; HttpOnly"},
+    )
+    cookie = _noon_verify("123456", "tok_abc123")
+    assert cookie == "_npsid=newcookie99"
+
+
+@rsps.activate
+def test_noon_verify_raises_when_no_cookie():
+    rsps.add(rsps.POST, _VERIFY_URL, json={"status": "ok"}, status=200)
+    with pytest.raises(AuthError, match="_npsid"):
+        _noon_verify("123456", "tok_abc123")
