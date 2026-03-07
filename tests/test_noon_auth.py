@@ -101,3 +101,32 @@ def test_update_github_secret_calls_api():
         put_body = mock_put.call_args[1]["json"]
         assert put_body["key_id"] == "key123"
         assert "encrypted_value" in put_body
+
+
+def test_re_authenticate_full_flow(monkeypatch):
+    monkeypatch.setenv("NOON_EMAIL", "user@example.com")
+    monkeypatch.setenv("NOON_PASSWORD", "pass123")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "bot:TOKEN")
+    monkeypatch.setenv("TELEGRAM_ADMIN_CHAT_ID", "99")
+    monkeypatch.setenv("GH_PAT", "ghp_test")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+
+    with patch("noon_auth._noon_login", return_value="tok_abc") as mock_login, \
+         patch("noon_auth._send_otp_prompt") as mock_prompt, \
+         patch("noon_auth._poll_for_otp", return_value="123456") as mock_poll, \
+         patch("noon_auth._noon_verify", return_value="_npsid=fresh99") as mock_verify, \
+         patch("noon_auth._update_github_secret") as mock_update:
+
+        result = re_authenticate()
+
+    assert result == "_npsid=fresh99"
+    mock_login.assert_called_once_with("user@example.com", "pass123")
+    mock_prompt.assert_called_once_with("bot:TOKEN", "99")
+    mock_poll.assert_called_once_with("bot:TOKEN", "99", timeout=180)
+    mock_verify.assert_called_once_with("123456", "tok_abc")
+    mock_update.assert_called_once_with(
+        secret_name="NOON_SESSION_COOKIE",
+        value="_npsid=fresh99",
+        pat="ghp_test",
+        repo="owner/repo",
+    )

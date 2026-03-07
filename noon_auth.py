@@ -145,4 +145,33 @@ def re_authenticate() -> str:
 
     Raises AuthError on any failure.
     """
-    raise NotImplementedError
+    email    = os.environ["NOON_EMAIL"]
+    password = os.environ["NOON_PASSWORD"]
+    bot_token      = os.environ["TELEGRAM_BOT_TOKEN"]
+    admin_chat_id  = os.environ["TELEGRAM_ADMIN_CHAT_ID"]
+    gh_pat   = os.environ["GH_PAT"]
+    gh_repo  = os.environ["GITHUB_REPOSITORY"]
+
+    print("  [noon_auth] Session expired — starting re-authentication flow")
+
+    token = _noon_login(email, password)
+    print("  [noon_auth] Login submitted — waiting for OTP from admin via Telegram")
+
+    _send_otp_prompt(bot_token, admin_chat_id)
+    otp = _poll_for_otp(bot_token, admin_chat_id, timeout=180)
+    print("  [noon_auth] OTP received — verifying")
+
+    new_cookie = _noon_verify(otp, token)
+    print(f"  [noon_auth] New session cookie obtained")
+
+    try:
+        _update_github_secret(
+            secret_name="NOON_SESSION_COOKIE",
+            value=new_cookie,
+            pat=gh_pat,
+            repo=gh_repo,
+        )
+    except Exception as e:
+        print(f"  [noon_auth] Warning: could not update GitHub secret: {e}")
+
+    return new_cookie
