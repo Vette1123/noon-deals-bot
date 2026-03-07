@@ -120,6 +120,17 @@ def _create_session(user_code: str, access_token: str, code_verifier: str, pkce_
     return f"_npsid={npsid_value}"
 
 
+def _get_next_update_offset(bot_token: str) -> int:
+    """Return the offset to use so we only see updates that arrive after this call."""
+    url = _TELEGRAM_API.format(token=bot_token, method="getUpdates")
+    resp = requests.get(url, params={"offset": -1, "limit": 1}, timeout=10)
+    if resp.ok:
+        results = resp.json().get("result", [])
+        if results:
+            return results[-1]["update_id"] + 1
+    return 0
+
+
 def _send_otp_prompt(bot_token: str, admin_chat_id: str) -> None:
     """Send a Telegram DM to the admin requesting the OTP."""
     url = _TELEGRAM_API.format(token=bot_token, method="sendMessage")
@@ -129,13 +140,14 @@ def _send_otp_prompt(bot_token: str, admin_chat_id: str) -> None:
     }, timeout=10)
 
 
-def _poll_for_otp(bot_token: str, admin_chat_id: str, timeout: int = 180) -> str:
+def _poll_for_otp(bot_token: str, admin_chat_id: str, timeout: int = 180, initial_offset: int = 0) -> str:
     """
     Long-poll Telegram getUpdates until admin replies with a message.
+    initial_offset must be set to skip messages that arrived before the OTP prompt.
     Returns the OTP text. Raises AuthError if timeout exceeded.
     """
     url = _TELEGRAM_API.format(token=bot_token, method="getUpdates")
-    offset = 0
+    offset = initial_offset
     deadline = time.time() + timeout
 
     while time.time() < deadline:
@@ -229,8 +241,11 @@ def re_authenticate() -> str:
     _request_otp(user_code, code_verifier, pkce_key)
     print("  [noon_auth] OTP requested — waiting for OTP from admin via Telegram")
 
+    # Snapshot the current update offset BEFORE sending the prompt so the poller
+    # ignores any old messages the admin may have previously sent to the bot.
+    next_offset = _get_next_update_offset(bot_token)
     _send_otp_prompt(bot_token, admin_chat_id)
-    otp = _poll_for_otp(bot_token, admin_chat_id, timeout=180)
+    otp = _poll_for_otp(bot_token, admin_chat_id, timeout=180, initial_offset=next_offset)
     print("  [noon_auth] OTP received — validating")
 
     access_token = _validate_otp(user_code, email, otp, code_verifier, pkce_key)
