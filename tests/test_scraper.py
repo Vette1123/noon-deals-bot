@@ -1,5 +1,5 @@
 import json
-from scraper import parse_products_from_html, fetch_deals_page
+from scraper import parse_products_from_html
 
 MOCK_NEXT_DATA = {
     "props": {
