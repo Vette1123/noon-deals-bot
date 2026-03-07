@@ -1,5 +1,6 @@
 import os
 import requests
+from noon_auth import re_authenticate, AuthError
 
 AFFILIATE_API_URL = "https://affiliates.noon.partners/_svc/affiliate/affiliate/campaign/custom_link"
 CAMPAIGN_CODE = "CMPa5461f39a36enoon"
@@ -11,7 +12,7 @@ class AffiliateError(Exception):
     pass
 
 
-def build_affiliate_link(product_url: str, product_name: str, session_cookie: str = None) -> str:
+def build_affiliate_link(product_url: str, product_name: str, session_cookie: str = None, _retried: bool = False) -> str:
     """
     Call noon.partners API to generate an s.noon.com affiliate tracking short link.
 
@@ -51,6 +52,13 @@ def build_affiliate_link(product_url: str, product_name: str, session_cookie: st
         response = requests.post(AFFILIATE_API_URL, json=payload, headers=headers, timeout=15)
         response.raise_for_status()
     except requests.HTTPError as e:
+        if response.status_code == 401 and not _retried:
+            print("  Affiliate API 401 — attempting session refresh")
+            try:
+                new_cookie = re_authenticate()
+                return build_affiliate_link(product_url, product_name, session_cookie=new_cookie, _retried=True)
+            except (AuthError, AffiliateError) as reauth_err:
+                raise AffiliateError(f"Re-auth failed: {reauth_err}") from reauth_err
         raise AffiliateError(f"Affiliate API error {response.status_code}: {response.text}") from e
     except requests.RequestException as e:
         raise AffiliateError(f"Affiliate API request failed: {e}") from e
