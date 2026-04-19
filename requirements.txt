@@ -2,4 +2,3 @@ requests==2.31.0
 curl_cffi==0.15.0
 beautifulsoup4==4.12.3
 python-telegram-bot==20.7
-pynacl==1.5.0

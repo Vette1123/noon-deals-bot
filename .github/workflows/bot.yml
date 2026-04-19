@@ -27,11 +27,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
-          NOON_SESSION_COOKIE: ${{ secrets.NOON_SESSION_COOKIE }}
-          NOON_EMAIL: ${{ secrets.NOON_EMAIL }}
-          NOON_USER_CODE: ${{ secrets.NOON_USER_CODE }}
-          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
-          GH_PAT: ${{ secrets.GH_PAT }}
+          NOON_COUPON_CODE: ${{ secrets.NOON_COUPON_CODE }}
         run: python main.py
 
       - name: Save posted products

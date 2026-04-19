@@ -1,11 +1,10 @@
 # Noon Deals Bot
 
-Auto-posts the best discounted products from [noon.com Egypt](https://www.noon.com/egypt-en/) to a Telegram channel, 6× a day, fully free to run.
+Auto-posts the best discounted products from [noon.com Egypt](https://www.noon.com/egypt-en/) to a Telegram channel, 6× a day — **fully free to run, no login required.**
 
-- Scrapes noon's deal pages using `curl_cffi` (Chrome TLS impersonation — no paid API needed)
-- Generates affiliate short-links via the noon.partners API
+- Scrapes noon's deal pages using `curl_cffi` (Chrome TLS impersonation — no paid API)
+- Attaches your influencer coupon code to every post as **tap-to-copy** text
 - Posts Arabic-formatted product cards with images to Telegram
-- Auto-refreshes noon's session cookie when it expires (OTP via Telegram DM)
 - Runs on GitHub Actions — no server required
 
 ## How it works
@@ -20,14 +19,17 @@ GitHub Actions (cron, 6×/day)
    filter new deals (≥5% off, not already posted)
         │
         ▼
-   build affiliate links  ──────────────────────────────────▶  noon.partners API
-        │                                                      (auto-reauth via OTP on 401)
-        ▼
-   post to Telegram channel  ───────────────────────────────▶  @noon_hot_deals
+   post to Telegram channel with:
+     • product image
+     • Arabic-formatted card
+     • tap-to-copy coupon code (e.g. gado1996)
+     • "Buy now" button → bare noon.com product URL
         │
         ▼
    commit updated state.json / posted.json
 ```
+
+**Attribution model:** users tap the coupon code in the message (copies to clipboard on mobile), click "Buy now", and paste the coupon at noon's checkout. The coupon both gives the customer a discount and attributes the sale to you — no affiliate API, no login, no session management.
 
 **Page cursor:** each run scrapes 2 pages and advances; after page 10 the cursor resets to 1 and `posted.json` is cleared so deals can be re-posted on the next cycle.
 
@@ -38,9 +40,7 @@ GitHub Actions (cron, 6×/day)
 | [main.py](main.py) | Entry point — orchestrates fetch → filter → post |
 | [scraper.py](scraper.py) | Fetches & parses noon.com catalog pages (RSC + fallbacks) |
 | [filters.py](filters.py) | Filters out already-posted SKUs and low-discount products |
-| [affiliate.py](affiliate.py) | Builds noon.partners affiliate tracking links |
-| [noon_auth.py](noon_auth.py) | 3-step PKCE OTP re-auth when session cookie expires |
-| [telegram_poster.py](telegram_poster.py) | Formats and posts product cards to Telegram |
+| [telegram_poster.py](telegram_poster.py) | Formats & posts product cards to Telegram (includes coupon line) |
 | [posted.json](posted.json) | SKUs already posted this cycle (reset at page wraparound) |
 | [state.json](state.json) | `{"next_page": N}` — pagination cursor |
 
@@ -59,13 +59,9 @@ python main.py             # real run
 | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | Bot that posts to the channel |
 | `TELEGRAM_CHANNEL_ID` | Channel handle (e.g. `@noon_hot_deals`) |
-| `TELEGRAM_ADMIN_CHAT_ID` | Your personal chat ID (receives OTP prompts) |
-| `NOON_SESSION_COOKIE` | `_npsid=…` from affiliates.noon.partners (auto-rotated) |
-| `NOON_EMAIL` | noon.partners login email (for re-auth) |
-| `NOON_USER_CODE` | noon.partners user code (for re-auth) |
-| `GH_PAT` | Fine-grained PAT with `secrets:write` (lets the bot rotate `NOON_SESSION_COOKIE`) |
+| `NOON_COUPON_CODE` | *(optional)* Your noon influencer coupon. Defaults to `gado1996`. |
 
-No scraping API key required — `curl_cffi` handles Akamai.
+That's it — three secrets, two of them truly required. No scraping API key, no noon.partners login, no session rotation, no OTP flow.
 
 ## Running tests
 

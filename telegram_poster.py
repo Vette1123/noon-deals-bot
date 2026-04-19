@@ -11,12 +11,12 @@ def _escape_md2(text: str) -> str:
     return re.sub(r"([_*\[\]()~`>#+\-=|{}.!\\])", r"\\\1", str(text))
 
 
-def format_message(product: dict) -> str:
+def format_message(product: dict, coupon: str = "") -> str:
     name = _escape_md2(product["name"])
     sale = _escape_md2(f"{product['sale_price']:,.0f}")
     orig = _escape_md2(f"{product['original_price']:,.0f}")
     disc = _escape_md2(f"{product['discount_pct']}%")
-    url  = product.get("affiliate_url", "")
+    url  = product.get("url", "")
 
     lines = [f"🔥 *{name}*"]
 
@@ -38,6 +38,12 @@ def format_message(product: dict) -> str:
 
     if product.get("store_name"):
         lines.append(f"🏪 {_escape_md2(product['store_name'])}")
+
+    # Coupon (tap-to-copy on mobile Telegram via MarkdownV2 code span).
+    # The value is constrained to [A-Za-z0-9_-] so no escaping is needed inside the span.
+    if coupon and re.fullmatch(r"[A-Za-z0-9_-]+", coupon):
+        lines.append("")
+        lines.append(f"🎟️ كود خصم إضافي عند الدفع: `{coupon}`")
 
     lines.append("")
     lines.append(f"👉 *[🛒 اشتري دلوقتي]({url})*")
@@ -63,11 +69,11 @@ def _download_image(url: str) -> BytesIO | None:
     return None
 
 
-def post_deal(product: dict, bot_token: str, channel_id: str) -> bool:
+def post_deal(product: dict, bot_token: str, channel_id: str, coupon: str = "") -> bool:
     bot = telegram.Bot(token=bot_token)
-    caption = format_message(product)
+    caption = format_message(product, coupon=coupon)
 
-    url = product.get("affiliate_url", "")
+    url = product.get("url", "")
     markup = _buy_button(url)
 
     image_url = product.get("image_url")
@@ -75,7 +81,6 @@ def post_deal(product: dict, bot_token: str, channel_id: str) -> bool:
     async def _run():
         print(f"  URL: {url}")
         if image_url:
-            # Try 1: pass URL string directly — Telegram fetches it (avoids CDN blocks)
             try:
                 await bot.send_photo(
                     chat_id=channel_id,
@@ -88,7 +93,6 @@ def post_deal(product: dict, bot_token: str, channel_id: str) -> bool:
             except Exception as e:
                 print(f"  Direct URL photo failed: {e}")
 
-            # Try 2: download ourselves and upload as bytes
             photo = _download_image(image_url)
             if photo:
                 try:
@@ -103,7 +107,6 @@ def post_deal(product: dict, bot_token: str, channel_id: str) -> bool:
                 except Exception as e:
                     print(f"  Uploaded photo failed: {e}")
 
-        # Fallback: text only
         await bot.send_message(
             chat_id=channel_id,
             text=caption,
