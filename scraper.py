@@ -1,6 +1,7 @@
 import re
 import json
 import time
+import random
 from curl_cffi import requests as cffi_requests
 from bs4 import BeautifulSoup
 
@@ -41,44 +42,60 @@ def fetch_products(start_page: int = 1) -> list[dict]:
     return all_products
 
 
-_BROWSER_HEADERS = {
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Referer": "https://www.noon.com/egypt-en/",
-    "Upgrade-Insecure-Requests": "1",
-}
+# Impersonation targets to rotate across on retries (newest first).
+# Rotating varies the JA3/JA4 + HTTP/2 fingerprint if Akamai flags a specific
+# profile. Only targets available in curl_cffi >=0.15 are listed.
+_IMPERSONATE_POOL = ["chrome146", "chrome142", "chrome136", "chrome131"]
 
 
-def _fetch_html(page: int = 1, max_attempts: int = 3) -> str:
+def _fetch_html(page: int = 1, max_attempts: int = 4) -> str:
     """Fetch a Noon deals page using Chrome TLS impersonation (curl_cffi).
 
-    Retries on transient 5xx/network errors (noon's origin sometimes 504s
-    on the heavily-filtered deals URL).
+    Retries on Akamai 403s (transient bot-check) and 5xx/network errors
+    (noon's origin occasionally 504s on the filtered deals URL).
+
+    Uses a Session with a homepage warm-up request so the Akamai bot-manager
+    cookie is set before the deals URL is hit — a cold request to a deep
+    filtered URL is a classic bot signal.
     """
     url = DEALS_URL if page == 1 else f"{DEALS_URL}&page={page}"
     last_err: str | None = None
 
-    for attempt in range(1, max_attempts + 1):
+    with cffi_requests.Session() as session:
+        # Warm-up: looks like a real user landing on the homepage first. Failure
+        # here isn't fatal — the main request has its own retry loop.
         try:
-            resp = cffi_requests.get(
-                url,
-                headers=_BROWSER_HEADERS,
-                impersonate="chrome",
-                timeout=90,
+            session.get(
+                "https://www.noon.com/egypt-en/",
+                impersonate=_IMPERSONATE_POOL[0],
+                timeout=30,
             )
         except Exception as e:
-            last_err = f"network error: {e}"
-        else:
-            if resp.ok:
-                print(f"  Page {page}: fetched {len(resp.text):,} bytes")
-                return resp.text
-            last_err = f"HTTP {resp.status_code}: {resp.text[:200]}"
-            if resp.status_code < 500:
-                break
+            print(f"  Warm-up request failed (continuing anyway): {e}")
 
-        print(f"  Page {page} attempt {attempt}/{max_attempts} failed: {last_err}")
-        if attempt < max_attempts:
-            time.sleep(2 * attempt)
+        for attempt in range(1, max_attempts + 1):
+            impersonate = _IMPERSONATE_POOL[(attempt - 1) % len(_IMPERSONATE_POOL)]
+            try:
+                resp = session.get(
+                    url,
+                    headers={"Referer": "https://www.noon.com/egypt-en/"},
+                    impersonate=impersonate,
+                    timeout=90,
+                )
+            except Exception as e:
+                last_err = f"network error: {e}"
+            else:
+                if resp.ok:
+                    print(f"  Page {page}: fetched {len(resp.text):,} bytes ({impersonate})")
+                    return resp.text
+                last_err = f"HTTP {resp.status_code}: {resp.text[:200]}"
+                # 4xx other than 403 is a hard no (404, 410, …) — don't burn retries.
+                if 400 <= resp.status_code < 500 and resp.status_code != 403:
+                    break
+
+            print(f"  Page {page} attempt {attempt}/{max_attempts} failed ({impersonate}): {last_err}")
+            if attempt < max_attempts:
+                time.sleep(2 * attempt + random.uniform(0.5, 1.5))
 
     raise RuntimeError(f"Fetch failed for page {page} after {max_attempts} attempts: {last_err}")
 
