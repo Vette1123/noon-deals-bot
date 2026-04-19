@@ -1,4 +1,4 @@
-from telegram_poster import format_message
+from telegram_poster import _build_markup, format_message
 
 
 def _product(**overrides):
@@ -42,3 +42,31 @@ def test_unsafe_coupon_is_rejected():
     # Anything outside [A-Za-z0-9_-] is dropped so we never emit unescaped content inside a code span
     msg = format_message(_product(), coupon="bad code!")
     assert "🎟️" not in msg
+
+
+def test_markup_has_copy_button_and_buy_button_when_coupon_present():
+    markup = _build_markup("https://www.noon.com/foo", coupon="gado1996")
+    rows = markup.inline_keyboard
+    assert len(rows) == 2
+    copy_btn = rows[0][0]
+    assert copy_btn.copy_text is not None
+    assert copy_btn.copy_text.text == "gado1996"
+    assert "gado1996" in copy_btn.text
+    assert "📋" in copy_btn.text
+    buy_btn = rows[1][0]
+    assert buy_btn.url == "https://www.noon.com/foo"
+    assert buy_btn.copy_text is None
+
+
+def test_markup_omits_copy_button_when_no_coupon():
+    markup = _build_markup("https://www.noon.com/foo", coupon="")
+    rows = markup.inline_keyboard
+    assert len(rows) == 1
+    assert rows[0][0].url == "https://www.noon.com/foo"
+
+
+def test_markup_rejects_unsafe_coupon():
+    markup = _build_markup("https://www.noon.com/foo", coupon="bad code!")
+    rows = markup.inline_keyboard
+    assert len(rows) == 1  # copy button dropped
+    assert rows[0][0].copy_text is None

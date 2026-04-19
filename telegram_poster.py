@@ -3,7 +3,7 @@ import re
 import requests
 from io import BytesIO
 import telegram
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import CopyTextButton, InlineKeyboardButton, InlineKeyboardMarkup
 
 
 def _escape_md2(text: str) -> str:
@@ -51,8 +51,19 @@ def format_message(product: dict, coupon: str = "") -> str:
     return "\n".join(lines)
 
 
-def _buy_button(url: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[InlineKeyboardButton("🛒 اشتري دلوقتي", url=url)]])
+def _build_markup(url: str, coupon: str = "") -> InlineKeyboardMarkup:
+    rows = []
+    # Native one-tap copy button (Bot API 7.8+). Shows the coupon value in the label so
+    # users can see exactly what gets copied, and the 📋 icon signals the action.
+    if coupon and re.fullmatch(r"[A-Za-z0-9_-]+", coupon):
+        rows.append([
+            InlineKeyboardButton(
+                f"📋 نسخ كود الخصم: {coupon}",
+                copy_text=CopyTextButton(text=coupon),
+            )
+        ])
+    rows.append([InlineKeyboardButton("🛒 اشتري دلوقتي", url=url)])
+    return InlineKeyboardMarkup(rows)
 
 
 def _download_image(url: str) -> BytesIO | None:
@@ -74,7 +85,7 @@ def post_deal(product: dict, bot_token: str, channel_id: str, coupon: str = "") 
     caption = format_message(product, coupon=coupon)
 
     url = product.get("url", "")
-    markup = _buy_button(url)
+    markup = _build_markup(url, coupon)
 
     image_url = product.get("image_url")
 
