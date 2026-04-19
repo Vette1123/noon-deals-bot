@@ -4,6 +4,7 @@ import requests
 from io import BytesIO
 import telegram
 from telegram import CopyTextButton, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.error import RetryAfter
 
 
 def _escape_md2(text: str) -> str:
@@ -89,7 +90,7 @@ def post_deal(product: dict, bot_token: str, channel_id: str, coupon: str = "") 
 
     image_url = product.get("image_url")
 
-    async def _run():
+    async def _attempt():
         print(f"  URL: {url}")
         if image_url:
             try:
@@ -101,6 +102,8 @@ def post_deal(product: dict, bot_token: str, channel_id: str, coupon: str = "") 
                     reply_markup=markup,
                 )
                 return True
+            except RetryAfter:
+                raise  # flood-limit isn't image-specific — skip fallbacks, let outer handler wait
             except Exception as e:
                 print(f"  Direct URL photo failed: {e}")
 
@@ -115,6 +118,8 @@ def post_deal(product: dict, bot_token: str, channel_id: str, coupon: str = "") 
                         reply_markup=markup,
                     )
                     return True
+                except RetryAfter:
+                    raise
                 except Exception as e:
                     print(f"  Uploaded photo failed: {e}")
 
@@ -125,6 +130,15 @@ def post_deal(product: dict, bot_token: str, channel_id: str, coupon: str = "") 
             reply_markup=markup,
         )
         return True
+
+    async def _run():
+        try:
+            return await _attempt()
+        except RetryAfter as e:
+            wait = int(e.retry_after) + 1
+            print(f"  Flood-limited by Telegram — waiting {wait}s then retrying once")
+            await asyncio.sleep(wait)
+            return await _attempt()
 
     try:
         return asyncio.run(_run())
