@@ -1,6 +1,8 @@
 # Amazon Egypt Support — Design Doc
 **Date:** 2026-03-04
 
+> **⚠️ Historical doc.** Zenrows was removed on 2026-04-19 and replaced with `curl_cffi` — ignore any Zenrows references below.
+
 ## Goal
 Add Amazon Egypt (amazon.eg) as a second deal source alongside Noon, posting 50 deals from each source per run (100 total) to the same Telegram channel, interleaved, using identical card formatting.
 

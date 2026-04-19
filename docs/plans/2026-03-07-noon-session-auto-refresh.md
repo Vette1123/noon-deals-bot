@@ -1,5 +1,7 @@
 # Noon Session Auto-Refresh Implementation Plan
 
+> **⚠️ Historical doc (2026-03-07).** Zenrows was removed on 2026-04-19 and replaced with `curl_cffi` — ignore any `ZENROWS_API_KEY` references below.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Automatically re-authenticate with noon.partners on 401, prompt admin for OTP via Telegram DM, and rotate the GitHub Secret — all without manual intervention.

@@ -1,7 +1,7 @@
-import os
 import re
 import json
-import requests
+import time
+from curl_cffi import requests as cffi_requests
 from bs4 import BeautifulSoup
 
 DEALS_URL = (
@@ -10,12 +10,12 @@ DEALS_URL = (
 )
 
 
-MAX_PAGES = 10       # total pages available on Noon
-PAGES_PER_RUN = 2    # Zenrows requests per run (keep credits low)
+MAX_PAGES = 10
+PAGES_PER_RUN = 2
 
 
 def fetch_products(start_page: int = 1) -> list[dict]:
-    """Fetch PAGES_PER_RUN pages starting from start_page via Zenrows."""
+    """Fetch PAGES_PER_RUN pages starting from start_page."""
     all_products: list[dict] = []
     seen_skus: set[str] = set()
 
@@ -41,25 +41,46 @@ def fetch_products(start_page: int = 1) -> list[dict]:
     return all_products
 
 
-def _fetch_html(page: int = 1) -> str:
-    """Fetch a Noon deals page via Zenrows (Akamai anti-bot bypass)."""
-    api_key = os.environ.get("ZENROWS_API_KEY", "")
-    if not api_key:
-        raise RuntimeError("ZENROWS_API_KEY is not set. Add it as a GitHub secret.")
+_BROWSER_HEADERS = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.noon.com/egypt-en/",
+    "Upgrade-Insecure-Requests": "1",
+}
 
+
+def _fetch_html(page: int = 1, max_attempts: int = 3) -> str:
+    """Fetch a Noon deals page using Chrome TLS impersonation (curl_cffi).
+
+    Retries on transient 5xx/network errors (noon's origin sometimes 504s
+    on the heavily-filtered deals URL).
+    """
     url = DEALS_URL if page == 1 else f"{DEALS_URL}&page={page}"
-    params = {"apikey": api_key, "url": url, "antibot": "true", "js_render": "true"}
-    resp = requests.get("https://api.zenrows.com/v1/", params=params, timeout=120)
+    last_err: str | None = None
 
-    if resp.status_code == 422:
-        print(f"  Zenrows 422 on page {page} — retrying with premium proxy...")
-        params["premium_proxy"] = "true"
-        resp = requests.get("https://api.zenrows.com/v1/", params=params, timeout=120)
+    for attempt in range(1, max_attempts + 1):
+        try:
+            resp = cffi_requests.get(
+                url,
+                headers=_BROWSER_HEADERS,
+                impersonate="chrome",
+                timeout=90,
+            )
+        except Exception as e:
+            last_err = f"network error: {e}"
+        else:
+            if resp.ok:
+                print(f"  Page {page}: fetched {len(resp.text):,} bytes")
+                return resp.text
+            last_err = f"HTTP {resp.status_code}: {resp.text[:200]}"
+            if resp.status_code < 500:
+                break
 
-    if not resp.ok:
-        raise RuntimeError(f"Zenrows error {resp.status_code}: {resp.text[:300]}")
-    print(f"  Page {page}: fetched {len(resp.text):,} bytes")
-    return resp.text
+        print(f"  Page {page} attempt {attempt}/{max_attempts} failed: {last_err}")
+        if attempt < max_attempts:
+            time.sleep(2 * attempt)
+
+    raise RuntimeError(f"Fetch failed for page {page} after {max_attempts} attempts: {last_err}")
 
 
 # ── Parsing ───────────────────────────────────────────────────────────────────

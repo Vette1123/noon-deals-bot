@@ -1,5 +1,7 @@
 # Amazon Egypt Support Implementation Plan
 
+> **⚠️ Historical doc (2026-03-04).** Zenrows was removed on 2026-04-19 and replaced with `curl_cffi` — ignore any `ZENROWS_API_KEY` references below.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Add Amazon Egypt (PA-API) as a second deal source, posting 50 Noon + 50 Amazon deals per run interleaved into the same Telegram channel with identical card formatting.
