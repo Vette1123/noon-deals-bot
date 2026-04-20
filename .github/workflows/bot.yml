@@ -23,11 +23,45 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # Akamai blocks GitHub Actions datacenter IPs regardless of TLS fingerprint.
+      # Route noon.com traffic through Cloudflare WARP (free) to get a clean
+      # consumer-routed egress IP. Telegram traffic bypasses the proxy.
+      - name: Set up Cloudflare WARP
+        run: |
+          set -euo pipefail
+          curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg \
+            | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" \
+            | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
+          sudo apt-get update
+          sudo apt-get install -y cloudflare-warp
+          sudo systemctl start warp-svc
+          # warp-svc needs a moment before it'll accept CLI commands
+          for i in {1..15}; do
+            warp-cli --accept-tos status >/dev/null 2>&1 && break
+            sleep 1
+          done
+          warp-cli --accept-tos registration new
+          warp-cli --accept-tos mode proxy
+          warp-cli --accept-tos connect
+          # Wait for tunnel to come up
+          for i in {1..30}; do
+            if curl -fsS --socks5-hostname 127.0.0.1:40000 https://www.cloudflare.com/cdn-cgi/trace | grep -q "warp=on"; then
+              echo "WARP connected"
+              break
+            fi
+            sleep 2
+          done
+          # Fail fast if WARP never came up — we do NOT want to silently fall back
+          # to the datacenter IP and waste a run on Akamai 403s.
+          curl -fsS --socks5-hostname 127.0.0.1:40000 https://www.cloudflare.com/cdn-cgi/trace | grep -q "warp=on"
+
       - name: Run bot
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
           NOON_COUPON_CODE: ${{ secrets.NOON_COUPON_CODE }}
+          SCRAPER_PROXY: socks5h://127.0.0.1:40000
         run: python main.py
 
       - name: Save posted products

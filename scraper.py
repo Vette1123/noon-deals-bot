@@ -1,9 +1,16 @@
+import os
 import re
 import json
 import time
 import random
 from curl_cffi import requests as cffi_requests
 from bs4 import BeautifulSoup
+
+# Optional SOCKS5/HTTP proxy for noon.com traffic only (not Telegram).
+# In CI we route through Cloudflare WARP to escape datacenter-IP reputation
+# checks by Akamai — see .github/workflows/bot.yml.
+_PROXY_URL = os.environ.get("SCRAPER_PROXY")
+_PROXIES = {"http": _PROXY_URL, "https": _PROXY_URL} if _PROXY_URL else None
 
 DEALS_URL = (
     "https://www.noon.com/egypt-en/all-products/"
@@ -61,7 +68,9 @@ def _fetch_html(page: int = 1, max_attempts: int = 4) -> str:
     url = DEALS_URL if page == 1 else f"{DEALS_URL}&page={page}"
     last_err: str | None = None
 
-    with cffi_requests.Session() as session:
+    if _PROXIES:
+        print(f"  Using proxy: {_PROXY_URL}")
+    with cffi_requests.Session(proxies=_PROXIES) as session:
         # Warm-up: looks like a real user landing on the homepage first. Failure
         # here isn't fatal — the main request has its own retry loop.
         try:

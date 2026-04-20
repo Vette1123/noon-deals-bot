@@ -59,7 +59,7 @@ def run(dry_run: bool = False) -> None:
     posted = 0
     for product in to_post:
         if dry_run:
-            print(f"[DRY RUN] {product['name']} ({product['discount_pct']}% off) → {product['url']} [coupon: {coupon}]")
+            print(f"[DRY RUN] {product['name']} ({product['discount_pct']}% off) -> {product['url']} [coupon: {coupon}]")
             already_posted[product["sku"]] = True
             posted += 1
             continue

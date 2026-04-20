@@ -14,7 +14,8 @@ Working notes for Claude Code in this repo. Short list, only the non-obvious thi
 
 - Use `curl_cffi` with `impersonate="chrome"` — this is the whole trick. See [scraper.py:_fetch_html](scraper.py).
 - Do **not** reintroduce Zenrows or any paid scraping API. The project's goal is to stay 100% free to run.
-- If Akamai ever starts blocking curl_cffi, the escalation ladder is: (1) bump `impersonate` to a newer Chrome version, (2) add random `User-Agent` + `Referer` jitter, (3) fall back to Playwright + stealth. Do not add a paid service.
+- **GitHub Actions datacenter IPs are blocked by Akamai** regardless of TLS fingerprint. CI routes noon.com through **Cloudflare WARP (free)** in proxy mode — see the "Set up Cloudflare WARP" step in [bot.yml](.github/workflows/bot.yml). Scraper reads `SCRAPER_PROXY`; when unset (local dev) it hits noon directly. Only the scraper uses the proxy — Telegram does not.
+- If Akamai ever starts blocking curl_cffi *from a clean residential IP*, the escalation ladder is: (1) bump `impersonate` to a newer Chrome version, (2) add random `User-Agent` + `Referer` jitter, (3) fall back to Playwright + stealth. Do not add a paid service.
 - noon's origin occasionally 504s on the filtered deals URL. That's not a block — just retry. The existing 3-attempt retry in `_fetch_html` handles it.
 
 ## Affiliate attribution (read this before touching posting)
