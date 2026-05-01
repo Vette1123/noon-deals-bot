@@ -1,4 +1,5 @@
 import asyncio
+import os
 import re
 import requests
 from io import BytesIO
@@ -12,12 +13,38 @@ def _escape_md2(text: str) -> str:
     return re.sub(r"([_*\[\]()~`>#+\-=|{}.!\\])", r"\\\1", str(text))
 
 
+def _with_affiliate_utms(url: str) -> str:
+    """Decorate a noon.com URL with this affiliate's tracking UTMs.
+
+    Idempotent (URLs already carrying utm_medium are returned unchanged) and
+    opt-out-able (set NOON_AFFILIATE_MEDIUM to empty to disable, e.g. local dev).
+    Defaults are this project's real campaign IDs — they are not secrets, they
+    appear in every public link the affiliate panel generates.
+    """
+    if not url or "utm_medium=" in url:
+        return url
+    medium = os.environ.get("NOON_AFFILIATE_MEDIUM", "AFFc944753cc349")
+    if not medium:
+        return url
+    campaign = os.environ.get("NOON_AFFILIATE_CAMPAIGN", "CMP2ce0b63a6a1anoon")
+    source = os.environ.get("NOON_AFFILIATE_SOURCE", "C1000264L")
+    qs = (
+        f"utm_campaign={campaign}"
+        f"&utm_medium={medium}"
+        f"&utm_source={source}"
+        f"&adjust_deeplink_js=1"
+    )
+    base, _, frag = url.partition("#")
+    sep = "&" if "?" in base else "?"
+    return f"{base}{sep}{qs}" + (f"#{frag}" if frag else "")
+
+
 def format_message(product: dict, coupon: str = "") -> str:
     name = _escape_md2(product["name"])
     sale = _escape_md2(f"{product['sale_price']:,.0f}")
     orig = _escape_md2(f"{product['original_price']:,.0f}")
     disc = _escape_md2(f"{product['discount_pct']}%")
-    url  = product.get("url", "")
+    url  = _with_affiliate_utms(product.get("url", ""))
 
     lines = [f"🔥 *{name}*"]
 
@@ -85,7 +112,7 @@ def post_deal(product: dict, bot_token: str, channel_id: str, coupon: str = "") 
     bot = telegram.Bot(token=bot_token)
     caption = format_message(product, coupon=coupon)
 
-    url = product.get("url", "")
+    url = _with_affiliate_utms(product.get("url", ""))
     markup = _build_markup(url, coupon)
 
     image_url = product.get("image_url")

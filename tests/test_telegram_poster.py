@@ -1,4 +1,4 @@
-from telegram_poster import _build_markup, format_message
+from telegram_poster import _build_markup, _with_affiliate_utms, format_message
 
 
 def _product(**overrides):
@@ -70,3 +70,55 @@ def test_markup_rejects_unsafe_coupon():
     rows = markup.inline_keyboard
     assert len(rows) == 1  # copy button dropped
     assert rows[0][0].copy_text is None
+
+
+def test_utms_appended_with_question_mark_when_no_query_string():
+    out = _with_affiliate_utms("https://www.noon.com/egypt-en/foo/N1A/p/")
+    assert "?utm_campaign=" in out
+    assert "&utm_medium=AFFc944753cc349" in out
+    assert "&utm_source=" in out
+    assert "&adjust_deeplink_js=1" in out
+
+
+def test_utms_appended_with_ampersand_when_query_string_already_present():
+    out = _with_affiliate_utms("https://www.noon.com/egypt-en/foo?ref=email")
+    assert "?ref=email&utm_campaign=" in out
+    assert out.count("?") == 1  # no second '?'
+
+
+def test_utms_idempotent_when_already_decorated():
+    decorated = _with_affiliate_utms("https://www.noon.com/egypt-en/foo/N1A/p/")
+    twice = _with_affiliate_utms(decorated)
+    assert twice == decorated
+
+
+def test_utms_preserve_url_fragment():
+    out = _with_affiliate_utms("https://www.noon.com/egypt-en/foo/N1A/p/#reviews")
+    assert out.endswith("#reviews")
+    assert "utm_medium=" in out
+
+
+def test_utms_disabled_when_medium_env_var_is_empty(monkeypatch):
+    monkeypatch.setenv("NOON_AFFILIATE_MEDIUM", "")
+    url = "https://www.noon.com/egypt-en/foo/N1A/p/"
+    assert _with_affiliate_utms(url) == url
+
+
+def test_utms_respect_env_var_overrides(monkeypatch):
+    monkeypatch.setenv("NOON_AFFILIATE_CAMPAIGN", "CMP_TEST")
+    monkeypatch.setenv("NOON_AFFILIATE_MEDIUM", "AFF_TEST")
+    monkeypatch.setenv("NOON_AFFILIATE_SOURCE", "SRC_TEST")
+    out = _with_affiliate_utms("https://www.noon.com/egypt-en/foo/N1A/p/")
+    assert "utm_campaign=CMP_TEST" in out
+    assert "utm_medium=AFF_TEST" in out
+    assert "utm_source=SRC_TEST" in out
+
+
+def test_utms_handles_empty_url():
+    assert _with_affiliate_utms("") == ""
+
+
+def test_format_message_decorates_url_with_utms():
+    msg = format_message(_product())
+    assert "utm_medium=AFFc944753cc349" in msg
+    assert "utm_campaign=CMP2ce0b63a6a1anoon" in msg
