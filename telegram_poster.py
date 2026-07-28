@@ -14,26 +14,48 @@ def _escape_md2(text: str) -> str:
     return re.sub(r"([_*\[\]()~`>#+\-=|{}.!\\])", r"\\\1", str(text))
 
 
+# Ours to own. Anything else in the query (notably noon's `o=`, which pins the
+# seller the advertised price belongs to) is left exactly as it was found.
+_AFFILIATE_PARAMS = ("utm_campaign", "utm_medium", "utm_source", "adjust_deeplink_js")
+
+
+def _without_affiliate_utms(url: str) -> str:
+    base, _, query = url.partition("?")
+    if not query:
+        return base
+    kept = [p for p in query.split("&") if p.split("=", 1)[0] not in _AFFILIATE_PARAMS]
+    return f"{base}?{'&'.join(kept)}" if kept else base
+
+
 def with_affiliate_utms(url: str) -> str:
     """Decorate a noon.com URL with this affiliate's tracking UTMs.
 
-    Idempotent (URLs already carrying utm_medium are returned unchanged) and
-    opt-out-able (set NOON_AFFILIATE_MEDIUM to empty to disable, e.g. local dev).
+    **Re-stamps** rather than skipping: any attribution already on the URL is
+    stripped and replaced with the current IDs. The archive stores decorated
+    URLs, so a link written months ago carries whatever ID was configured then —
+    and when the old one turned out to be wrong, "leave URLs that already have
+    utm_medium alone" meant every archived deal page kept serving the broken one
+    forever. Re-stamping makes a rotation propagate on the next build.
+
+    Still idempotent (applying it twice gives the same URL) and still
+    opt-out-able: set NOON_AFFILIATE_MEDIUM to empty and it strips instead.
     Defaults are this project's real campaign IDs — they are not secrets, they
     appear in every public link the affiliate panel generates.
 
     Public because every surface that publishes a product link has to earn on it:
     Telegram, the static site, and the Facebook crosspost all go through here.
     """
-    if not url or "utm_medium=" in url:
+    if not url:
         return url
     # Read out of a link the panel generated on 2026-07-28, by resolving the
     # short link it hands you and reading the query it lands on. The previous
     # value here (AFFc944753cc349) was not this account's ID, so every click the
     # bot ever sent was unattributed. Re-check the same way if commissions stop.
     medium = os.environ.get("NOON_AFFILIATE_MEDIUM", "AFFccacc092d97d")
+    base, _, frag = url.partition("#")
+    base = _without_affiliate_utms(base)
     if not medium:
-        return url
+        return base + (f"#{frag}" if frag else "")
     campaign = os.environ.get("NOON_AFFILIATE_CAMPAIGN", "CMP2ce0b63a6a1anoon")
     source = os.environ.get("NOON_AFFILIATE_SOURCE", "C1000264L")
     qs = (
@@ -42,7 +64,6 @@ def with_affiliate_utms(url: str) -> str:
         f"&utm_source={source}"
         f"&adjust_deeplink_js=1"
     )
-    base, _, frag = url.partition("#")
     sep = "&" if "?" in base else "?"
     return f"{base}{sep}{qs}" + (f"#{frag}" if frag else "")
 

@@ -24,6 +24,7 @@ from urllib.parse import quote
 
 from archive import ARCHIVE_FILE, load_archive, prune_archive
 from categories import category_label
+from telegram_poster import with_affiliate_utms
 
 OUT_DIR = "public"
 # A custom domain is worth buying *before* the site ranks: ranking earned on a
@@ -175,6 +176,17 @@ def _category_index(deals: list[dict]) -> dict[str, dict]:
         group = groups.setdefault(slug, {"name": label, "deals": []})
         group["deals"].append(deal)
     return {s: g for s, g in groups.items() if len(g["deals"]) >= MIN_DEALS_PER_CATEGORY}
+
+
+def _out_url(deal: dict) -> str:
+    """The outbound noon link, re-stamped with the *current* affiliate IDs.
+
+    The archive stores decorated URLs, so a deal recorded months ago carries
+    whatever ID was configured then. Re-stamping at render time means correcting
+    a wrong or rotated ID fixes every page on the next build, instead of leaving
+    a year of archived pages sending unattributed traffic.
+    """
+    return with_affiliate_utms(deal.get("url") or "")
 
 
 def _is_stale(deal: dict, now: datetime) -> bool:
@@ -760,7 +772,7 @@ def _product_ld(deal: dict, canonical: str, now: datetime) -> dict:
         "sku": deal.get("sku"),
         "offers": {
             "@type": "Offer",
-            "url": deal.get("url") or canonical,
+            "url": _out_url(deal) or canonical,
             "priceCurrency": "EGP",
             "price": f"{float(deal.get('sale_price') or 0):.2f}",
             "availability": "https://schema.org/InStock",
@@ -902,7 +914,7 @@ def _deal_html(deal: dict, related: list[tuple[dict, str]], now: datetime,
     </div>
     {facts_html}
     {coupon_html}
-    <div class="buy"><a class="cta" href="{_esc(deal.get('url', ''))}"
+    <div class="buy"><a class="cta" href="{_esc(_out_url(deal))}"
       rel="nofollow sponsored noopener" target="_blank">{buy_label}</a></div>
     {caveat}
     {more_html}

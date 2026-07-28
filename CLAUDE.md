@@ -29,7 +29,12 @@ Two attribution channels run in parallel — both are message-side, neither need
    appends `utm_campaign` / `utm_medium=AFF…` / `utm_source=C…` / `adjust_deeplink_js=1`. These are the
    IDs from the affiliate panel, not secrets. Overridable via `NOON_AFFILIATE_MEDIUM` / `_CAMPAIGN` /
    `_SOURCE`; set `NOON_AFFILIATE_MEDIUM=""` to disable locally. If commissions stop landing, re-copy a
-   fresh link out of the panel and compare the params — noon does rotate them.
+   fresh link out of the panel and compare the params — noon does rotate them. To read the real ones:
+   panel → campaign → *Links* → copy a link → open the `s.noon.com/…` short URL and read where it lands.
+   - `with_affiliate_utms` **re-stamps**: it strips our four params and reapplies them, keeping noon's
+     own `o=` pin. It used to return URLs that already had a `utm_medium` unchanged, which meant the
+     archive's stored URLs kept serving a wrong ID forever. The site re-stamps at render time
+     (`site_builder._out_url`), so fixing the ID here repairs every archived page on the next build.
 2. **Influencer coupon code** shown in the message body. Users copy it and paste at checkout.
 - The coupon is configurable via `NOON_COUPON_CODE` (defaults to `gado` — see [main.py](main.py); the panel is the source of truth for which codes are live).
 - Do **not** reintroduce `noon_auth.py`, `affiliate.py`, OTP flows, or session cookies. If you think you need them, you're solving the wrong problem — the coupon-in-message approach is the intentional design.

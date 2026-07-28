@@ -442,3 +442,12 @@ def test_deal_pages_can_be_forwarded_to_a_whatsapp_group(tmp_path):
     assert "https://wa.me/?text=" in page
     # The page, not the product link: a group that gets this comes back.
     assert quote(f"{site_builder.SITE_BASE_URL}/deals/N1A.html", safe="") in page
+
+
+def test_pages_relink_with_the_current_affiliate_id_not_the_archived_one(tmp_path):
+    stale = _deal(url="https://www.noon.com/egypt-en/x/N1A/p/?o=abc&utm_medium=AFFwrong")
+    out, _ = _build([stale], tmp_path)
+    page = _read(out, "deals/N1A.html")
+    assert "AFFwrong" not in page
+    assert "utm_medium=AFFccacc092d97d" in page
+    assert "o=abc" in page

@@ -167,3 +167,28 @@ def test_share_button_sits_next_to_buy_not_above_it():
 def test_buy_button_stands_alone_without_a_share_link():
     rows = _build_markup("https://www.noon.com/foo").inline_keyboard
     assert len(rows) == 1 and len(rows[0]) == 1
+
+
+def test_a_rotated_affiliate_id_replaces_the_old_one():
+    # The archive stores decorated URLs. Skipping URLs that already carry a
+    # utm_medium meant a wrong ID stayed on every archived page forever.
+    stale = ("https://www.noon.com/egypt-en/foo/N1A/p/?o=abc"
+             "&utm_campaign=OLDCMP&utm_medium=AFFold&utm_source=Cold&adjust_deeplink_js=1")
+    out = with_affiliate_utms(stale)
+    assert "AFFold" not in out and "OLDCMP" not in out and "Cold" not in out
+    assert "utm_medium=AFFccacc092d97d" in out
+    assert out.count("utm_medium=") == 1
+    # noon's own offer pin is not ours to touch: dropping it lands the reader on
+    # a different, pricier offer for the same SKU.
+    assert "o=abc" in out
+    assert with_affiliate_utms(out) == out
+
+
+def test_disabling_attribution_strips_what_is_already_there():
+    import os
+    stale = "https://www.noon.com/egypt-en/foo/N1A/p/?o=abc&utm_medium=AFFold"
+    os.environ["NOON_AFFILIATE_MEDIUM"] = ""
+    try:
+        assert with_affiliate_utms(stale) == "https://www.noon.com/egypt-en/foo/N1A/p/?o=abc"
+    finally:
+        del os.environ["NOON_AFFILIATE_MEDIUM"]
