@@ -117,13 +117,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # No `enablement: true` here: creating the Pages site needs admin scope
+      # that GITHUB_TOKEN does not have, and the step fails with "Resource not
+      # accessible by integration". Pages is already enabled on this repo with
+      # build_type=workflow; a fork needs Settings > Pages > Source: GitHub Actions.
       - name: Configure Pages
         id: pages
         uses: actions/configure-pages@v5
-        with:
-          # Turns Pages on the first time this runs, so the site needs no
-          # click in repository settings to go live.
-          enablement: true
 
       - name: Build site
         env:
