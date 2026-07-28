@@ -3,7 +3,7 @@ import sys
 import json
 import time
 from scraper import fetch_products, MAX_PAGES, PAGES_PER_RUN
-from filters import filter_deals, load_posted, save_posted, MIN_DISCOUNT
+from filters import filter_deals, load_posted, save_posted, MIN_DISCOUNT, MIN_PRICE
 from telegram_poster import post_deal
 
 POSTED_FILE = "posted.json"
@@ -41,13 +41,16 @@ def run(dry_run: bool = False) -> None:
     print(f"Found {len(products)} products")
 
     if not products:
+        # Hard failure, not a quiet no-op: a 0-product scrape means noon changed
+        # the page again (that's how the 2026-06-30 breakage stayed invisible for
+        # a month behind green CI runs). Reset the cursor, then fail the job.
         print("No products found — resetting page cursor to 1 for next run.")
         _save_state({"next_page": 1})
-        return
+        raise SystemExit("Scraped 0 products — noon page format likely changed. Failing loudly.")
 
     already_posted = load_posted(POSTED_FILE)
     new_deals = filter_deals(products, already_posted)
-    print(f"{len(new_deals)} new qualifying deals (>={MIN_DISCOUNT}% off)")
+    print(f"{len(new_deals)} new qualifying deals (>={MIN_DISCOUNT}% off, >=EGP {MIN_PRICE:,.0f})")
 
     if not new_deals:
         print("Nothing new to post.")

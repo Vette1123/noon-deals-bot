@@ -23,13 +23,15 @@ GitHub Actions (cron, 6×/day)
      • product image
      • Arabic-formatted card
      • tap-to-copy coupon code (e.g. gado1996)
-     • "Buy now" button → bare noon.com product URL
+     • "Buy now" button → noon.com product URL + affiliate UTMs
         │
         ▼
    commit updated state.json / posted.json
 ```
 
-**Attribution model:** users tap the coupon code in the message (copies to clipboard on mobile), click "Buy now", and paste the coupon at noon's checkout. The coupon both gives the customer a discount and attributes the sale to you — no affiliate API, no login, no session management.
+**Attribution model:** two channels, both message-side, neither needs a login. Every "Buy now" link carries the affiliate campaign UTMs, and the message body shows a tap-to-copy coupon code that users paste at noon's checkout.
+
+**What gets posted:** at least **25% off** and at least **EGP 150** sale price. Cheap deep-discount items are filtered out — affiliate commission is a percentage of basket value, so they cost a post slot and earn close to nothing.
 
 **Page cursor:** each run scrapes 2 pages and advances; after page 10 the cursor resets to 1 and `posted.json` is cleared so deals can be re-posted on the next cycle.
 
@@ -38,8 +40,8 @@ GitHub Actions (cron, 6×/day)
 | File | Purpose |
 | --- | --- |
 | [main.py](main.py) | Entry point — orchestrates fetch → filter → post |
-| [scraper.py](scraper.py) | Fetches & parses noon.com catalog pages (RSC + fallbacks) |
-| [filters.py](filters.py) | Filters out already-posted SKUs and low-discount products |
+| [scraper.py](scraper.py) | Fetches & parses noon.com catalog pages (inline JS payload + fallbacks) |
+| [filters.py](filters.py) | Filters out already-posted SKUs, weak discounts and low-value items |
 | [telegram_poster.py](telegram_poster.py) | Formats & posts product cards to Telegram (includes coupon line) |
 | [posted.json](posted.json) | SKUs already posted this cycle (reset at page wraparound) |
 | [state.json](state.json) | `{"next_page": N}` — pagination cursor |
@@ -52,6 +54,11 @@ cp .env.example .env  # fill in values
 python main.py --dry-run   # prints what would be posted, skips Telegram
 python main.py             # real run
 ```
+
+> Since mid-2026 Akamai also challenges cold requests from residential IPs, so a local run may fail at
+> the fetch step with `Akamai JS challenge`. CI is unaffected (it egresses through Cloudflare WARP).
+> To debug parsing locally, save the page HTML from a real browser and feed it to
+> `scraper.parse_products_from_html`.
 
 ## Required secrets (GitHub Actions)
 
