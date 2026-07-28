@@ -68,6 +68,9 @@ jobs:
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
           NOON_COUPON_CODE: ${{ secrets.NOON_COUPON_CODE }}
           SCRAPER_PROXY: socks5h://127.0.0.1:40000
+          # Crossposting is opt-in. With these unset the bot skips Facebook entirely.
+          FACEBOOK_PAGE_ID: ${{ secrets.FACEBOOK_PAGE_ID }}
+          FACEBOOK_PAGE_TOKEN: ${{ secrets.FACEBOOK_PAGE_TOKEN }}
         run: python main.py
 
       # always(): if the bot dies partway through posting it has already written
@@ -78,7 +81,62 @@ jobs:
         run: |
           git config user.name "Mohamed Gado"
           git config user.email "boogado@yahoo.com"
-          git add posted.json state.json
+          # One at a time: `git add` on a path that does not exist yet is a fatal
+          # error, and deals.json is missing until the first successful run.
+          for f in posted.json state.json deals.json; do
+            [ -f "$f" ] && git add "$f"
+          done
           git diff --staged --quiet || git commit -m "chore: update state [skip ci]"
           git pull --rebase origin main
           git push
+
+  # The same deals, published as a static site Google can index. Runs even when
+  # the scrape failed: the archive still holds a month of deals worth serving.
+  publish-site:
+    needs: post-deals
+    if: always()
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # post-deals has just pushed the updated deals.json.
+          ref: main
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
+        with:
+          # Turns Pages on the first time this runs, so the site needs no
+          # click in repository settings to go live.
+          enablement: true
+
+      - name: Build site
+        env:
+          # From configure-pages, so a custom domain later needs no code change.
+          SITE_BASE_URL: ${{ steps.pages.outputs.base_url }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          NOON_COUPON_CODE: ${{ secrets.NOON_COUPON_CODE }}
+        run: python site_builder.py
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4

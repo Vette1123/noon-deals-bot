@@ -26,7 +26,11 @@ def workdir(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(main, "POSTED_FILE", str(tmp_path / "posted.json"))
     monkeypatch.setattr(main, "STATE_FILE", str(tmp_path / "state.json"))
+    monkeypatch.setattr(main, "ARCHIVE_FILE", str(tmp_path / "deals.json"))
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    # Facebook is opt-in; the default test run must never touch the Graph API.
+    monkeypatch.delenv("FACEBOOK_PAGE_ID", raising=False)
+    monkeypatch.delenv("FACEBOOK_PAGE_TOKEN", raising=False)
     return tmp_path
 
 
@@ -99,6 +103,52 @@ def test_post_cap_is_respected(workdir, monkeypatch):
     monkeypatch.setattr(main, "post_deal", lambda *a, **k: True)
     main.run()
     assert len(_read(workdir / "posted.json")) == 5
+
+
+def test_posted_deals_are_archived_for_the_site(workdir, monkeypatch):
+    monkeypatch.setattr(main, "fetch_products", lambda start_page=1: [_product("A")])
+    monkeypatch.setattr(main, "DELAY_BETWEEN_POSTS", 0)
+    monkeypatch.setattr(main, "post_deal", lambda *a, **k: True)
+    main.run()
+    deals = _read(workdir / "deals.json")["deals"]
+    assert [d["sku"] for d in deals] == ["A"]
+    assert "utm_medium=" in deals[0]["url"]
+
+
+def test_failed_posts_never_reach_the_archive(workdir, monkeypatch):
+    # A deal nobody saw must not get a page claiming we published it.
+    monkeypatch.setattr(main, "fetch_products", lambda start_page=1: [_product("A")])
+    monkeypatch.setattr(main, "DELAY_BETWEEN_POSTS", 0)
+    monkeypatch.setattr(main, "post_deal", lambda *a, **k: False)
+    main.run()
+    assert _read(workdir / "deals.json") == {"deals": []}
+
+
+def test_facebook_crosspost_is_skipped_unless_configured(workdir, monkeypatch):
+    monkeypatch.setattr(main, "fetch_products", lambda start_page=1: [_product("A")])
+    monkeypatch.setattr(main, "DELAY_BETWEEN_POSTS", 0)
+    monkeypatch.setattr(main, "post_deal", lambda *a, **k: True)
+    monkeypatch.setattr(
+        main, "post_to_facebook",
+        lambda *a, **k: pytest.fail("Facebook must stay opt-in"),
+    )
+    main.run()
+
+
+def test_facebook_crosspost_runs_when_configured(workdir, monkeypatch):
+    monkeypatch.setenv("FACEBOOK_PAGE_ID", "123")
+    monkeypatch.setenv("FACEBOOK_PAGE_TOKEN", "tok")
+    monkeypatch.setattr(main, "fetch_products", lambda start_page=1: [_product("A")])
+    monkeypatch.setattr(main, "DELAY_BETWEEN_POSTS", 0)
+    monkeypatch.setattr(main, "post_deal", lambda *a, **k: True)
+    crossposted = []
+    monkeypatch.setattr(
+        main, "post_to_facebook",
+        lambda product, url, **k: crossposted.append(url) or True,
+    )
+    main.run()
+    assert len(crossposted) == 1
+    assert "utm_medium=" in crossposted[0]
 
 
 def test_cursor_wraps_at_the_end_of_the_catalogue():

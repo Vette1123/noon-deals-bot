@@ -1,10 +1,18 @@
 # Noon Deals Bot
 
+[![Telegram channel](https://img.shields.io/badge/Telegram-%40noon__hot__deals-2CA5E0?logo=telegram&logoColor=white)](https://t.me/noon_hot_deals)
+[![Deals site](https://img.shields.io/badge/%D8%AF%D9%8A%D9%84%D8%B2%20%D9%85%D8%B5%D8%B1-live-c81e4a)](https://vette1123.github.io/noon-deals-bot/)
+[![Bot](https://github.com/Vette1123/noon-deals-bot/actions/workflows/bot.yml/badge.svg)](https://github.com/Vette1123/noon-deals-bot/actions/workflows/bot.yml)
+
+**Channel:** [t.me/noon_hot_deals](https://t.me/noon_hot_deals) · **Site:** [vette1123.github.io/noon-deals-bot](https://vette1123.github.io/noon-deals-bot/)
+
 Auto-posts the best discounted products from [noon.com Egypt](https://www.noon.com/egypt-en/) to a Telegram channel, 6× a day — **fully free to run, no login required.**
 
 - Scrapes noon's deal pages using `curl_cffi` (Chrome TLS impersonation — no paid API)
 - Attaches your influencer coupon code to every post as **tap-to-copy** text
 - Posts Arabic-formatted product cards with images to Telegram
+- Republishes the same deals as a **static Arabic site on GitHub Pages** so search traffic earns too
+- Optionally crossposts to a **Facebook Page**
 - Runs on GitHub Actions — no server required
 
 ## How it works
@@ -26,7 +34,12 @@ GitHub Actions (cron, 6×/day)
      • "Buy now" button → noon.com product URL + affiliate UTMs
         │
         ▼
-   commit updated state.json / posted.json
+   commit updated state.json / posted.json / deals.json
+        │
+        ├──▶  crosspost to a Facebook Page (only if secrets are set)
+        │
+        ▼
+   rebuild the static site from deals.json ──▶ GitHub Pages
 ```
 
 **Attribution model:** two channels, both message-side, neither needs a login. Every "Buy now" link carries the affiliate campaign UTMs, and the message body shows a tap-to-copy coupon code that users paste at noon's checkout.
@@ -34,6 +47,20 @@ GitHub Actions (cron, 6×/day)
 **What gets posted:** at least **25% off**, at least **EGP 150**, and not rated below 3.5 by 20+ buyers. Survivors are ranked by a `deal_score` (discount + rating + basket value + trust flags), deduplicated by name, capped at **2 per seller**, and the top **12** go out. Commission is a percentage of basket value, so cheap deep-discount filler earns nothing and only costs subscribers.
 
 **Page cursor:** each run scrapes 2 pages and advances, wrapping at page 60 (~3,000 products, a 5-day cycle). A SKU already posted is on cooldown for **21 days**.
+
+## The static site
+
+Every posted deal is archived to [deals.json](deals.json) and rendered into a small Arabic (RTL) site: a front page, one page per deal with `Product` structured data, `sitemap.xml`, `robots.txt` and an RSS feed. No JavaScript, no web fonts, no external requests — search traffic arrives on mobile data, and page speed is ranking.
+
+It matters because it earns **without an audience**: a Telegram post reaches today's subscribers, a page that ranks reaches everyone who searches. Enable it once under *Settings → Pages → Source: GitHub Actions*; the `publish-site` job does the rest on every run.
+
+Preview it locally:
+
+```bash
+python site_builder.py && python -m http.server -d public 8000
+```
+
+See [docs/MONETIZATION.md](docs/MONETIZATION.md) for what earns, what is built, and what still needs a human.
 
 ## Project layout
 
@@ -43,8 +70,12 @@ GitHub Actions (cron, 6×/day)
 | [scraper.py](scraper.py) | Fetches & parses noon.com catalog pages (inline JS payload + fallbacks) |
 | [filters.py](filters.py) | Filters out already-posted SKUs, weak discounts and low-value items |
 | [telegram_poster.py](telegram_poster.py) | Formats & posts product cards to Telegram (includes coupon line) |
-| [posted.json](posted.json) | SKUs already posted this cycle (reset at page wraparound) |
+| [archive.py](archive.py) | Records posted deals into `deals.json` (30-day window) |
+| [site_builder.py](site_builder.py) | Renders `deals.json` into the static site in `public/` |
+| [facebook_poster.py](facebook_poster.py) | Optional Facebook Page crosspost (no-op without secrets) |
+| [posted.json](posted.json) | `{sku: ISO timestamp}` — per-SKU repost cooldown |
 | [state.json](state.json) | `{"next_page": N}` — pagination cursor |
+| [deals.json](deals.json) | The published-deal archive the site is built from |
 
 ## Local setup
 
@@ -67,8 +98,10 @@ python main.py             # real run
 | `TELEGRAM_BOT_TOKEN` | Bot that posts to the channel |
 | `TELEGRAM_CHANNEL_ID` | Channel handle (e.g. `@noon_hot_deals`) |
 | `NOON_COUPON_CODE` | *(optional)* Your noon influencer coupon. Defaults to `gado1996`. |
+| `FACEBOOK_PAGE_ID` | *(optional)* Enables the Facebook crosspost. Skipped when unset. |
+| `FACEBOOK_PAGE_TOKEN` | *(optional)* Long-lived Page token with `pages_manage_posts`. |
 
-That's it — three secrets, two of them truly required. No scraping API key, no noon.partners login, no session rotation, no OTP flow.
+Two are truly required. No scraping API key, no noon.partners login, no session rotation, no OTP flow.
 
 ## Running tests
 

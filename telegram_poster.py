@@ -3,6 +3,7 @@ import os
 import re
 import requests
 from io import BytesIO
+from urllib.parse import quote
 import telegram
 from telegram import CopyTextButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import RetryAfter
@@ -13,13 +14,16 @@ def _escape_md2(text: str) -> str:
     return re.sub(r"([_*\[\]()~`>#+\-=|{}.!\\])", r"\\\1", str(text))
 
 
-def _with_affiliate_utms(url: str) -> str:
+def with_affiliate_utms(url: str) -> str:
     """Decorate a noon.com URL with this affiliate's tracking UTMs.
 
     Idempotent (URLs already carrying utm_medium are returned unchanged) and
     opt-out-able (set NOON_AFFILIATE_MEDIUM to empty to disable, e.g. local dev).
     Defaults are this project's real campaign IDs — they are not secrets, they
     appear in every public link the affiliate panel generates.
+
+    Public because every surface that publishes a product link has to earn on it:
+    Telegram, the static site, and the Facebook crosspost all go through here.
     """
     if not url or "utm_medium=" in url:
         return url
@@ -60,7 +64,7 @@ def format_message(product: dict, coupon: str = "") -> str:
     sale = _escape_md2(f"{product['sale_price']:,.0f}")
     orig = _escape_md2(f"{product['original_price']:,.0f}")
     disc = _escape_md2(f"{product['discount_pct']}%")
-    url  = _with_affiliate_utms(product.get("url", ""))
+    url  = with_affiliate_utms(product.get("url", ""))
 
     lines = [f"🔥 *{name}*"]
 
@@ -99,7 +103,21 @@ def format_message(product: dict, coupon: str = "") -> str:
     return "\n".join(lines)
 
 
-def _build_markup(url: str, coupon: str = "") -> InlineKeyboardMarkup:
+def channel_share_url(channel_id: str, product_name: str = "") -> str:
+    """A `t.me/share` link that forwards the *channel*, not the deal.
+
+    Forwards are how a Telegram channel actually grows, and a subscriber is worth
+    far more than the single click a shared product link would earn. Only public
+    @handles can be shared this way — numeric chat IDs have no public URL.
+    """
+    handle = (channel_id or "").strip().lstrip("@")
+    if not handle or not re.fullmatch(r"[A-Za-z0-9_]{5,32}", handle):
+        return ""
+    text = quote(f"{product_name}\nعروض نون كل يوم 🔥", safe="")
+    return f"https://t.me/share/url?url={quote(f'https://t.me/{handle}', safe='')}&text={text}"
+
+
+def _build_markup(url: str, coupon: str = "", share_url: str = "") -> InlineKeyboardMarkup:
     rows = []
     # Native one-tap copy button (Bot API 7.8+). Shows the coupon value in the label so
     # users can see exactly what gets copied, and the 📋 icon signals the action.
@@ -110,7 +128,12 @@ def _build_markup(url: str, coupon: str = "") -> InlineKeyboardMarkup:
                 copy_text=CopyTextButton(text=coupon),
             )
         ])
-    rows.append([InlineKeyboardButton("🛒 اشتري دلوقتي", url=url)])
+    buy = InlineKeyboardButton("🛒 اشتري دلوقتي", url=url)
+    if share_url:
+        # Same row: sharing must never compete with buying for vertical attention.
+        rows.append([buy, InlineKeyboardButton("📤 شارك", url=share_url)])
+    else:
+        rows.append([buy])
     return InlineKeyboardMarkup(rows)
 
 
@@ -132,8 +155,8 @@ def post_deal(product: dict, bot_token: str, channel_id: str, coupon: str = "") 
     bot = telegram.Bot(token=bot_token)
     caption = format_message(product, coupon=coupon)
 
-    url = _with_affiliate_utms(product.get("url", ""))
-    markup = _build_markup(url, coupon)
+    url = with_affiliate_utms(product.get("url", ""))
+    markup = _build_markup(url, coupon, channel_share_url(channel_id, product.get("name", "")))
 
     image_url = product.get("image_url")
 

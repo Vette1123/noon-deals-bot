@@ -98,9 +98,46 @@ without re-measuring.
   every 10-page cycle, so the same ~500 products recycled roughly once a day. 60 pages ≈ 3,000
   products and a 5-day cursor cycle, with a 21-day cooldown per SKU on top.
 
+## Publishing surfaces (Telegram is not the only one)
+
+The same scrape is published three ways. Read [docs/MONETIZATION.md](docs/MONETIZATION.md)
+before changing any of them — the reasoning behind each is there, not here.
+
+- **Telegram** — [telegram_poster.py](telegram_poster.py). The share button forwards the
+  *channel*, not the product: a subscriber is worth far more than one click. Only public
+  `@handles` can be shared, so `channel_share_url` returns `""` for numeric chat IDs.
+- **The static site** — [archive.py](archive.py) records every posted deal into
+  [deals.json](deals.json); [site_builder.py](site_builder.py) renders it into `public/`
+  and the `publish-site` job in [bot.yml](.github/workflows/bot.yml) deploys it to Pages.
+  It needs no subscribers, which is the whole point of it.
+- **Facebook** — [facebook_poster.py](facebook_poster.py), opt-in via `FACEBOOK_PAGE_ID`
+  + `FACEBOOK_PAGE_TOKEN`. Unset, it is a no-op. It must never fail the run: it swallows
+  its own errors on purpose.
+
+`with_affiliate_utms` is public and is the single place link attribution is added.
+Anything that publishes a product URL goes through it, or that traffic is unpaid.
+
+## The static site (rules that are load-bearing)
+
+- **No JavaScript, no web fonts, no external CSS.** Search traffic lands on Egyptian
+  mobile data; every request is LCP and LCP is ranking. Arabic type comes from the
+  system stack. There is a test asserting this — do not "improve" it with a font CDN.
+- **Never inline scraped text into a `<script>` without `_ld_json`.** Product names are
+  written by marketplace sellers. `html.escape` cannot be used inside JSON-LD, so
+  `_ld_json` escapes `< > &` as `\uXXXX`, which is valid JSON and cannot close the tag.
+- **Only claim an `aggregateRating` noon actually reported.** Inventing review counts is
+  how a site loses rich results permanently.
+- **Keep the affiliate disclosure in the footer and keep the palette off noon's yellow.**
+  Looking like the merchant is an affiliate-account-termination risk, not a style choice.
+- Outbound product links are `rel="nofollow sponsored noopener"`.
+- Deal filenames come from the SKU and are validated against `^[A-Za-z0-9_-]+$` — a SKU
+  is scraped data, and `../../` in a filename writes outside the output directory.
+
 ## State files
 
-- [posted.json](posted.json) and [state.json](state.json) are **committed** by the workflow after each run (`chore: update state [skip ci]`). That's intentional — they're the bot's memory. Don't add them to `.gitignore`.
+- [posted.json](posted.json), [state.json](state.json) and [deals.json](deals.json) are **committed** by the workflow after each run (`chore: update state [skip ci]`). That's intentional — they're the bot's memory. Don't add them to `.gitignore`.
+- `deals.json` is the site's data source, capped at 30 days / 3,000 deals by
+  `prune_archive`. Generated HTML is **not** committed — `publish-site` rebuilds it.
 - `posted.json` is `{sku: ISO-8601 timestamp}`. The legacy `{sku: true}` form still loads — those
   entries are read as "posted just now" and rewritten with a real stamp by `prune_posted`, so an
   upgrade never re-floods the channel.

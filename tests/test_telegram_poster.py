@@ -1,4 +1,9 @@
-from telegram_poster import _build_markup, _with_affiliate_utms, format_message
+from telegram_poster import (
+    _build_markup,
+    channel_share_url,
+    format_message,
+    with_affiliate_utms,
+)
 
 
 def _product(**overrides):
@@ -73,7 +78,7 @@ def test_markup_rejects_unsafe_coupon():
 
 
 def test_utms_appended_with_question_mark_when_no_query_string():
-    out = _with_affiliate_utms("https://www.noon.com/egypt-en/foo/N1A/p/")
+    out = with_affiliate_utms("https://www.noon.com/egypt-en/foo/N1A/p/")
     assert "?utm_campaign=" in out
     assert "&utm_medium=AFFc944753cc349" in out
     assert "&utm_source=" in out
@@ -81,19 +86,19 @@ def test_utms_appended_with_question_mark_when_no_query_string():
 
 
 def test_utms_appended_with_ampersand_when_query_string_already_present():
-    out = _with_affiliate_utms("https://www.noon.com/egypt-en/foo?ref=email")
+    out = with_affiliate_utms("https://www.noon.com/egypt-en/foo?ref=email")
     assert "?ref=email&utm_campaign=" in out
     assert out.count("?") == 1  # no second '?'
 
 
 def test_utms_idempotent_when_already_decorated():
-    decorated = _with_affiliate_utms("https://www.noon.com/egypt-en/foo/N1A/p/")
-    twice = _with_affiliate_utms(decorated)
+    decorated = with_affiliate_utms("https://www.noon.com/egypt-en/foo/N1A/p/")
+    twice = with_affiliate_utms(decorated)
     assert twice == decorated
 
 
 def test_utms_preserve_url_fragment():
-    out = _with_affiliate_utms("https://www.noon.com/egypt-en/foo/N1A/p/#reviews")
+    out = with_affiliate_utms("https://www.noon.com/egypt-en/foo/N1A/p/#reviews")
     assert out.endswith("#reviews")
     assert "utm_medium=" in out
 
@@ -101,21 +106,21 @@ def test_utms_preserve_url_fragment():
 def test_utms_disabled_when_medium_env_var_is_empty(monkeypatch):
     monkeypatch.setenv("NOON_AFFILIATE_MEDIUM", "")
     url = "https://www.noon.com/egypt-en/foo/N1A/p/"
-    assert _with_affiliate_utms(url) == url
+    assert with_affiliate_utms(url) == url
 
 
 def test_utms_respect_env_var_overrides(monkeypatch):
     monkeypatch.setenv("NOON_AFFILIATE_CAMPAIGN", "CMP_TEST")
     monkeypatch.setenv("NOON_AFFILIATE_MEDIUM", "AFF_TEST")
     monkeypatch.setenv("NOON_AFFILIATE_SOURCE", "SRC_TEST")
-    out = _with_affiliate_utms("https://www.noon.com/egypt-en/foo/N1A/p/")
+    out = with_affiliate_utms("https://www.noon.com/egypt-en/foo/N1A/p/")
     assert "utm_campaign=CMP_TEST" in out
     assert "utm_medium=AFF_TEST" in out
     assert "utm_source=SRC_TEST" in out
 
 
 def test_utms_handles_empty_url():
-    assert _with_affiliate_utms("") == ""
+    assert with_affiliate_utms("") == ""
 
 
 def test_format_message_decorates_url_with_utms():
@@ -135,3 +140,30 @@ def test_trust_badges_rendered_when_flags_present():
 
 def test_trust_badge_line_omitted_when_no_flags():
     assert "شحن نون" not in format_message(_product())
+
+
+def test_share_link_forwards_the_channel_not_the_product():
+    # A forward that wins a subscriber beats one that wins a single click.
+    share = channel_share_url("@noon_hot_deals", "Samsung A15")
+    assert share.startswith("https://t.me/share/url?url=")
+    assert "https%3A%2F%2Ft.me%2Fnoon_hot_deals" in share
+    assert "Samsung" in share
+
+
+def test_share_link_omitted_for_private_channels():
+    # Numeric chat IDs have no public t.me URL, so a share button would 404.
+    assert channel_share_url("-1001234567890") == ""
+    assert channel_share_url("") == ""
+
+
+def test_share_button_sits_next_to_buy_not_above_it():
+    markup = _build_markup("https://www.noon.com/foo", share_url="https://t.me/share/url?url=x")
+    rows = markup.inline_keyboard
+    assert len(rows) == 1 and len(rows[0]) == 2
+    assert rows[0][0].text == "🛒 اشتري دلوقتي"
+    assert "شارك" in rows[0][1].text
+
+
+def test_buy_button_stands_alone_without_a_share_link():
+    rows = _build_markup("https://www.noon.com/foo").inline_keyboard
+    assert len(rows) == 1 and len(rows[0]) == 1

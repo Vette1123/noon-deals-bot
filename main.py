@@ -3,6 +3,14 @@ import sys
 import json
 import time
 from scraper import fetch_products, MAX_PAGES, PAGES_PER_RUN
+from archive import (
+    ARCHIVE_FILE,
+    load_archive,
+    prune_archive,
+    record_deal,
+    save_archive,
+)
+from facebook_poster import facebook_enabled, post_to_facebook
 from filters import (
     MIN_DISCOUNT,
     MIN_PRICE,
@@ -13,7 +21,7 @@ from filters import (
     prune_posted,
     save_posted,
 )
-from telegram_poster import post_deal
+from telegram_poster import post_deal, with_affiliate_utms
 
 POSTED_FILE = "posted.json"
 STATE_FILE  = "state.json"
@@ -68,6 +76,7 @@ def run(dry_run: bool = False) -> None:
         raise SystemExit("Scraped 0 products — noon page format likely changed. Failing loudly.")
 
     already_posted = prune_posted(load_posted(POSTED_FILE))
+    archive = prune_archive(load_archive(ARCHIVE_FILE))
     new_deals = filter_deals(products, already_posted)
     print(
         f"{len(new_deals)} qualifying deals "
@@ -84,13 +93,20 @@ def run(dry_run: bool = False) -> None:
                     f"-> {product['url']} [coupon: {coupon}]"
                 )
                 mark_posted(already_posted, product["sku"])
+                record_deal(archive, product)
                 posted += 1
                 continue
 
             if post_deal(product, bot_token, channel_id, coupon=coupon):
                 mark_posted(already_posted, product["sku"])
+                record_deal(archive, product)
                 posted += 1
                 print(f"Posted: {product['name']} ({product['discount_pct']}% off)")
+                if facebook_enabled():
+                    post_to_facebook(
+                        product, with_affiliate_utms(product["url"]),
+                        coupon=coupon, channel_handle=channel_id,
+                    )
                 if posted < len(to_post):
                     time.sleep(DELAY_BETWEEN_POSTS)
             else:
@@ -99,6 +115,7 @@ def run(dry_run: bool = False) -> None:
         # Persist even if posting blows up mid-loop — otherwise every already-sent
         # deal in this run gets posted a second time on the next one.
         save_posted(already_posted, POSTED_FILE)
+        save_archive(archive, ARCHIVE_FILE)
         _save_state({"next_page": _next_page(start_page)})
 
     print(f"Done. Posted {posted} deals. Next run starts at page {_next_page(start_page)}.")
