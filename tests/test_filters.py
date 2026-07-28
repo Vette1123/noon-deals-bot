@@ -9,9 +9,22 @@ PRODUCTS = [
 ]
 
 def test_filter_keeps_qualifying_new_deals():
-    skus = [p["sku"] for p in filter_deals(PRODUCTS, {"A4": True}, min_discount=20)]
+    skus = [p["sku"] for p in filter_deals(PRODUCTS, {"A4": True}, min_discount=20, min_price=0)]
     assert "A1" in skus and "A3" in skus
     assert "A2" not in skus and "A4" not in skus
+
+def test_filter_drops_cheap_items_regardless_of_discount():
+    # A3 is 50% off but only EGP 50 — the commission on it is not worth a post slot.
+    skus = [p["sku"] for p in filter_deals(PRODUCTS, {}, min_discount=20, min_price=100)]
+    assert skus == ["A1"]
+
+def test_filter_defaults_enforce_both_gates():
+    products = [
+        {"sku": "OK",    "discount_pct": 25, "sale_price": 150},
+        {"sku": "CHEAP", "discount_pct": 60, "sale_price": 149},
+        {"sku": "WEAK",  "discount_pct": 24, "sale_price": 900},
+    ]
+    assert [p["sku"] for p in filter_deals(products, {})] == ["OK"]
 
 def test_load_posted_missing_file():
     assert load_posted("/nonexistent/posted.json") == {}
