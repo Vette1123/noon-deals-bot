@@ -5,6 +5,12 @@ on:
     - cron: '0 4,8,12,16,20,0 * * *'
   workflow_dispatch:
 
+# Two runs must never overlap: both commit posted.json/state.json, and the loser
+# of the race would push a state that forgets what the other already posted.
+concurrency:
+  group: noon-deals-bot
+  cancel-in-progress: false
+
 jobs:
   post-deals:
     runs-on: ubuntu-22.04
@@ -12,11 +18,11 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
@@ -64,7 +70,11 @@ jobs:
           SCRAPER_PROXY: socks5h://127.0.0.1:40000
         run: python main.py
 
+      # always(): if the bot dies partway through posting it has already written
+      # posted.json in a finally block — commit it or those deals get sent twice.
+      # The job still reports failure; this step only preserves state.
       - name: Save posted products
+        if: always()
         run: |
           git config user.name "Mohamed Gado"
           git config user.email "boogado@yahoo.com"

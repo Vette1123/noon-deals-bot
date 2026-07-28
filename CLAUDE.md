@@ -77,9 +77,37 @@ Two attribution channels run in parallel — both are message-side, neither need
 - Akamai's bot check answers **HTTP 200** with a ~2 KB JS interstitial. `_is_akamai_challenge` treats
   it as a failed fetch so it burns a retry instead of parsing to 0 products.
 
+## Channel economics (why the filters look like this)
+
+Every rule in [filters.py](filters.py) exists because it was measured, not guessed. Don't relax one
+without re-measuring.
+
+- **`MIN_PRICE = 150`** — commission is a percentage of basket value. A 60%-off EGP 40 item earns
+  nothing and still burns a post slot.
+- **`MIN_RATING = 3.5`, only above `RATING_CONFIDENCE` reviews** — a 2.1★ product with 3 reviews is
+  noise; with 400 reviews it's a refund waiting to happen, and refunds void commission.
+- **`deal_score`** ranks by expected earnings (discount + rating + basket value + trust flags), not by
+  headline discount. A 45%-off EGP 1,500 bestseller outranks a 68%-off EGP 190 no-name.
+- **`MAX_PER_SELLER = 2`** — in one live sample a single store ("ELLE Cosmetics") owned 18 of 72
+  qualifying deals, including 8 near-identical body splashes. Uncapped, the channel becomes its
+  catalogue and readers mute it.
+- **`_dedupe_by_name`** — the same listing is often resold by several stores under the identical name.
+- **`MAX_POSTS_PER_RUN = 12`** (env-overridable) — was 50, i.e. 300 posts/day. Nobody stays subscribed
+  to that.
+- **`REPOST_AFTER_DAYS = 21`** with `MAX_PAGES = 60` — the old code wiped `posted.json` at the end of
+  every 10-page cycle, so the same ~500 products recycled roughly once a day. 60 pages ≈ 3,000
+  products and a 5-day cursor cycle, with a 21-day cooldown per SKU on top.
+
 ## State files
 
 - [posted.json](posted.json) and [state.json](state.json) are **committed** by the workflow after each run (`chore: update state [skip ci]`). That's intentional — they're the bot's memory. Don't add them to `.gitignore`.
+- `posted.json` is `{sku: ISO-8601 timestamp}`. The legacy `{sku: true}` form still loads — those
+  entries are read as "posted just now" and rewritten with a real stamp by `prune_posted`, so an
+  upgrade never re-floods the channel.
+- The save step runs `if: always()` and `main.run` writes state in a `finally` block, so a crash
+  partway through posting cannot cause every deal in that run to be sent twice.
+- The workflow has a `concurrency` group. Two overlapping runs would both commit state and the loser
+  would push a version that forgets what the other posted.
 
 ## Testing conventions
 

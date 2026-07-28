@@ -122,3 +122,16 @@ def test_format_message_decorates_url_with_utms():
     msg = format_message(_product())
     assert "utm_medium=AFFc944753cc349" in msg
     assert "utm_campaign=CMP2ce0b63a6a1anoon" in msg
+
+
+def test_trust_badges_rendered_when_flags_present():
+    msg = format_message(_product(
+        is_bestseller=True, fulfilled_by_noon=True, free_delivery=True,
+    ))
+    assert "الأكثر مبيعاً" in msg
+    assert "شحن نون" in msg
+    assert "توصيل مجاني" in msg
+
+
+def test_trust_badge_line_omitted_when_no_flags():
+    assert "شحن نون" not in format_message(_product())

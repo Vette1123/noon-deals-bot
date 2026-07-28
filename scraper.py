@@ -23,7 +23,10 @@ DEALS_URL = (
 )
 
 
-MAX_PAGES = 10
+# The `min_offer_price=365_days` result set is ~109k items (2,000+ pages), so the
+# old MAX_PAGES=10 meant the channel recycled the same ~500 products roughly once
+# a day. 60 pages ≈ 3,000 products ≈ a 5-day cycle at 6 runs/day.
+MAX_PAGES = 60
 PAGES_PER_RUN = 2
 
 
@@ -466,6 +469,8 @@ def _normalize_item(item: dict) -> dict | None:
     offer_code = item.get("offer_code")
     offer_qs = f"?o={offer_code}" if offer_code else ""
 
+    flags = item.get("flags") or []
+
     return {
         "name": name,
         "sku": clean_sku,
@@ -479,6 +484,10 @@ def _normalize_item(item: dict) -> dict | None:
         "rating_count": int(rating_count) if rating_count else None,
         "store_name": item.get("store_name") or "",
         "estimated_delivery": re.sub(r"<[^>]+>", "", item.get("estimated_delivery_date") or "").strip(),
+        # Trust signals — they drive conversion, and conversion is what pays.
+        "fulfilled_by_noon": "fbn" in flags,
+        "free_delivery": "free_delivery_eligible" in flags,
+        "is_bestseller": bool(item.get("is_bestseller")),
     }
 
 

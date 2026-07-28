@@ -3,12 +3,23 @@ import sys
 import json
 import time
 from scraper import fetch_products, MAX_PAGES, PAGES_PER_RUN
-from filters import filter_deals, load_posted, save_posted, MIN_DISCOUNT, MIN_PRICE
+from filters import (
+    MIN_DISCOUNT,
+    MIN_PRICE,
+    REPOST_AFTER_DAYS,
+    filter_deals,
+    load_posted,
+    mark_posted,
+    prune_posted,
+    save_posted,
+)
 from telegram_poster import post_deal
 
 POSTED_FILE = "posted.json"
 STATE_FILE  = "state.json"
-MAX_POSTS_PER_RUN = 50
+# Six runs a day. 12 keeps the channel at ~70 posts/day without the burst of 50
+# near-identical cards that made readers mute it.
+MAX_POSTS_PER_RUN = int(os.environ.get("MAX_POSTS_PER_RUN", "12"))
 DELAY_BETWEEN_POSTS = 3
 DEFAULT_COUPON_CODE = "gado1996"
 
@@ -24,6 +35,14 @@ def _load_state() -> dict:
 def _save_state(state: dict) -> None:
     with open(STATE_FILE, "w") as f:
         json.dump(state, f, indent=2)
+
+
+def _next_page(start_page: int) -> int:
+    """Advance the pagination cursor, wrapping at the end of the catalogue."""
+    following = start_page + PAGES_PER_RUN
+    if following > MAX_PAGES:
+        return 1
+    return following
 
 
 def run(dry_run: bool = False) -> None:
@@ -48,43 +67,42 @@ def run(dry_run: bool = False) -> None:
         _save_state({"next_page": 1})
         raise SystemExit("Scraped 0 products — noon page format likely changed. Failing loudly.")
 
-    already_posted = load_posted(POSTED_FILE)
+    already_posted = prune_posted(load_posted(POSTED_FILE))
     new_deals = filter_deals(products, already_posted)
-    print(f"{len(new_deals)} new qualifying deals (>={MIN_DISCOUNT}% off, >=EGP {MIN_PRICE:,.0f})")
+    print(
+        f"{len(new_deals)} qualifying deals "
+        f"(>={MIN_DISCOUNT}% off, >=EGP {MIN_PRICE:,.0f}, not posted in {REPOST_AFTER_DAYS}d)"
+    )
 
-    if not new_deals:
-        print("Nothing new to post.")
-        return
-
-    new_deals.sort(key=lambda x: x["discount_pct"], reverse=True)
     to_post = new_deals[:MAX_POSTS_PER_RUN]
-
     posted = 0
-    for product in to_post:
-        if dry_run:
-            print(f"[DRY RUN] {product['name']} ({product['discount_pct']}% off) -> {product['url']} [coupon: {coupon}]")
-            already_posted[product["sku"]] = True
-            posted += 1
-            continue
+    try:
+        for product in to_post:
+            if dry_run:
+                print(
+                    f"[DRY RUN] {product['name']} ({product['discount_pct']}% off) "
+                    f"-> {product['url']} [coupon: {coupon}]"
+                )
+                mark_posted(already_posted, product["sku"])
+                posted += 1
+                continue
 
-        if post_deal(product, bot_token, channel_id, coupon=coupon):
-            already_posted[product["sku"]] = True
-            posted += 1
-            print(f"Posted: {product['name']} ({product['discount_pct']}% off)")
-            if posted < len(to_post):
-                time.sleep(DELAY_BETWEEN_POSTS)
-        else:
-            print(f"Failed: {product['name']}")
+            if post_deal(product, bot_token, channel_id, coupon=coupon):
+                mark_posted(already_posted, product["sku"])
+                posted += 1
+                print(f"Posted: {product['name']} ({product['discount_pct']}% off)")
+                if posted < len(to_post):
+                    time.sleep(DELAY_BETWEEN_POSTS)
+            else:
+                print(f"Failed: {product['name']}")
+    finally:
+        # Persist even if posting blows up mid-loop — otherwise every already-sent
+        # deal in this run gets posted a second time on the next one.
+        save_posted(already_posted, POSTED_FILE)
+        _save_state({"next_page": _next_page(start_page)})
 
-    next_page = start_page + PAGES_PER_RUN
-    if next_page > MAX_PAGES:
-        next_page = 1
-        already_posted = {}
-        print("Full cycle complete — resetting posted history for next round.")
+    print(f"Done. Posted {posted} deals. Next run starts at page {_next_page(start_page)}.")
 
-    _save_state({"next_page": next_page})
-    save_posted(already_posted, POSTED_FILE)
-    print(f"Done. Posted {posted} deals. Next run starts at page {next_page}.")
 
 if __name__ == "__main__":
     run(dry_run="--dry-run" in sys.argv)

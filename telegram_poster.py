@@ -39,6 +39,22 @@ def _with_affiliate_utms(url: str) -> str:
     return f"{base}{sep}{qs}" + (f"#{frag}" if frag else "")
 
 
+def _trust_badges(product: dict) -> list[str]:
+    """Short trust markers — they lift click-through, which is what gets paid.
+
+    All literals here are already MarkdownV2-safe (no reserved characters), so
+    they deliberately skip `_escape_md2`.
+    """
+    badges = []
+    if product.get("is_bestseller"):
+        badges.append("🔥 الأكثر مبيعاً")
+    if product.get("fulfilled_by_noon"):
+        badges.append("✅ شحن نون")
+    if product.get("free_delivery"):
+        badges.append("🚚 توصيل مجاني")
+    return badges
+
+
 def format_message(product: dict, coupon: str = "") -> str:
     name = _escape_md2(product["name"])
     sale = _escape_md2(f"{product['sale_price']:,.0f}")
@@ -66,6 +82,10 @@ def format_message(product: dict, coupon: str = "") -> str:
 
     if product.get("store_name"):
         lines.append(f"🏪 {_escape_md2(product['store_name'])}")
+
+    badges = _trust_badges(product)
+    if badges:
+        lines.append(" • ".join(badges))
 
     # Coupon (tap-to-copy on mobile Telegram via MarkdownV2 code span).
     # The value is constrained to [A-Za-z0-9_-] so no escaping is needed inside the span.

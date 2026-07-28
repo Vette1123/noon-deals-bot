@@ -31,9 +31,9 @@ GitHub Actions (cron, 6×/day)
 
 **Attribution model:** two channels, both message-side, neither needs a login. Every "Buy now" link carries the affiliate campaign UTMs, and the message body shows a tap-to-copy coupon code that users paste at noon's checkout.
 
-**What gets posted:** at least **25% off** and at least **EGP 150** sale price. Cheap deep-discount items are filtered out — affiliate commission is a percentage of basket value, so they cost a post slot and earn close to nothing.
+**What gets posted:** at least **25% off**, at least **EGP 150**, and not rated below 3.5 by 20+ buyers. Survivors are ranked by a `deal_score` (discount + rating + basket value + trust flags), deduplicated by name, capped at **2 per seller**, and the top **12** go out. Commission is a percentage of basket value, so cheap deep-discount filler earns nothing and only costs subscribers.
 
-**Page cursor:** each run scrapes 2 pages and advances; after page 10 the cursor resets to 1 and `posted.json` is cleared so deals can be re-posted on the next cycle.
+**Page cursor:** each run scrapes 2 pages and advances, wrapping at page 60 (~3,000 products, a 5-day cycle). A SKU already posted is on cooldown for **21 days**.
 
 ## Project layout
 
