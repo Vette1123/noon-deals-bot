@@ -87,7 +87,9 @@ Realistically it is still 2 to 4 months before search traffic means anything.
 
 ## What still needs a human
 
-Ranked by expected return per hour of effort.
+Ranked by expected return per hour of effort. **[ACTION-PLAN.md](ACTION-PLAN.md) is
+the same list as a checklist with the exact steps** — this section is the reasoning
+behind it.
 
 ### 1. Verify the affiliate link still credits — 15 minutes, do this first
 

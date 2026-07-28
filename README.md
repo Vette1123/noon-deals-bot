@@ -1,10 +1,14 @@
 # Noon Deals Bot
 
+<!-- Badge labels stay Latin: shields.io renders SVG text with no Arabic shaper, so
+     "ديلز مصر" came out as disconnected letters in the wrong order. The Arabic name
+     goes in the prose below, where GitHub shapes it properly. -->
+
 [![Telegram channel](https://img.shields.io/badge/Telegram-%40noon__hot__deals-2CA5E0?logo=telegram&logoColor=white)](https://t.me/noon_hot_deals)
-[![Deals site](https://img.shields.io/badge/%D8%AF%D9%8A%D9%84%D8%B2%20%D9%85%D8%B5%D8%B1-live-c81e4a)](https://vette1123.github.io/noon-deals-bot/)
+[![Deals site](https://img.shields.io/badge/deals%20site-live-c81e4a)](https://vette1123.github.io/noon-deals-bot/)
 [![Bot](https://github.com/Vette1123/noon-deals-bot/actions/workflows/bot.yml/badge.svg)](https://github.com/Vette1123/noon-deals-bot/actions/workflows/bot.yml)
 
-**Channel:** [t.me/noon_hot_deals](https://t.me/noon_hot_deals) · **Site:** [vette1123.github.io/noon-deals-bot](https://vette1123.github.io/noon-deals-bot/)
+**Channel:** [t.me/noon_hot_deals](https://t.me/noon_hot_deals) · **Site:** ديلز مصر — [vette1123.github.io/noon-deals-bot](https://vette1123.github.io/noon-deals-bot/)
 
 Auto-posts the best discounted products from [noon.com Egypt](https://www.noon.com/egypt-en/) to a Telegram channel, 6× a day — **fully free to run, no login required.**
 
