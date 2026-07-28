@@ -67,6 +67,15 @@ Two rules it will not break:
 
 Enable it once under *Settings → Pages → Source: GitHub Actions*; the `publish-site` job does the rest. To move it onto your own domain, set the `SITE_DOMAIN` repository variable and point the DNS at Pages — worth doing before it ranks, not after.
 
+### Getting indexed
+
+Every build re-emits two ownership files at the site root, and every deploy announces what changed:
+
+- **Google Search Console** — `google<token>.html`, served verbatim. Verify the property once, then submit `sitemap.xml`. A fork points `GOOGLE_SITE_VERIFICATION` at its own token.
+- **IndexNow** — `<key>.txt` plus a POST to `api.indexnow.org` *after* the deploy, listing only the pages that run changed: the front page, the new deal pages and the hubs they landed on. Bing, Yandex and Seznam then crawl in minutes instead of weeks. Google does not participate — there, `sitemap.xml` + `lastmod` is still the lever. The key is public by design (serving it is the proof of ownership), so it belongs in `INDEXNOW_KEY` as a *variable*, never a secret.
+
+Neither can fail a run: a malformed token is dropped with a warning, and a rejected ping is logged and ignored.
+
 Preview it locally:
 
 ```bash
@@ -87,6 +96,7 @@ See [docs/MONETIZATION.md](docs/MONETIZATION.md) for what earns, what is built, 
 | [archive.py](archive.py) | Records deals into `deals.json` (1-year window, then tombstoned) |
 | [site_builder.py](site_builder.py) | Renders `deals.json` into the static site in `public/` |
 | [facebook_poster.py](facebook_poster.py) | Optional Facebook Page crosspost (no-op without secrets) |
+| [indexnow.py](indexnow.py) | Announces changed URLs to Bing/Yandex/Seznam after each deploy |
 | [posted.json](posted.json) | `{sku: ISO timestamp}` — per-SKU repost cooldown |
 | [state.json](state.json) | `{"next_task": N}` — cursor into the category-feed rotation |
 | [deals.json](deals.json) | The published-deal archive the site is built from |

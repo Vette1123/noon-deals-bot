@@ -134,6 +134,10 @@ jobs:
           # CNAME file and rewrites every absolute URL; also point the DNS at
           # GitHub Pages. Worth doing before the site ranks, not after.
           SITE_DOMAIN: ${{ vars.SITE_DOMAIN }}
+          # Only needed to verify a *different* Search Console property (a fork,
+          # or a new domain). Empty falls back to the token baked into
+          # site_builder.py, so the default repo needs no variable set.
+          GOOGLE_SITE_VERIFICATION: ${{ vars.GOOGLE_SITE_VERIFICATION }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
           NOON_COUPON_CODE: ${{ secrets.NOON_COUPON_CODE }}
         run: python site_builder.py
@@ -145,3 +149,15 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deploy
         uses: actions/deploy-pages@v4
+
+      # After the deploy, never before: IndexNow crawlers fetch a submitted URL
+      # within minutes, and one that still 404s because Pages has not swapped the
+      # artifact yet gets dropped. Never fails the job — indexing is upside.
+      - name: Ping IndexNow
+        continue-on-error: true
+        env:
+          SITE_BASE_URL: ${{ steps.pages.outputs.base_url }}
+          SITE_DOMAIN: ${{ vars.SITE_DOMAIN }}
+          # Public by design — it is served at /{key}.txt. A fork sets its own.
+          INDEXNOW_KEY: ${{ vars.INDEXNOW_KEY }}
+        run: python indexnow.py

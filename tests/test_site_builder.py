@@ -3,6 +3,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
+import indexnow
 import site_builder
 from site_builder import build_site
 
@@ -182,7 +183,44 @@ def test_empty_archive_still_produces_a_valid_site(tmp_path):
     out, written = _build([], tmp_path)
     assert "لا توجد عروض" in _read(out, "index.html")
     assert (out / "sitemap.xml").exists()
-    assert written == ["index.html", "robots.txt", "sitemap.xml", "feed.xml", ".nojekyll"]
+    assert written == [
+        "index.html", "robots.txt", "sitemap.xml", "feed.xml", ".nojekyll",
+        site_builder.GSC_VERIFICATION, indexnow.key_file(),
+    ]
+
+
+def test_search_console_file_is_written_verbatim_and_not_indexable(tmp_path):
+    out, written = _build([_deal()], tmp_path)
+    name = site_builder.GSC_VERIFICATION
+    assert name == "google7349409b25f0c975.html"
+    assert name in written
+    # Google rejects a modified file — no doctype, no noindex meta, no newline.
+    assert _read(out, name) == f"google-site-verification: {name}"
+    # Thin page, so it must stay unlinked and uncrawlable-by-discovery: absent
+    # from sitemap.xml, but still allowed by robots.txt or verification breaks.
+    assert name not in _read(out, "sitemap.xml")
+    assert name not in _read(out, "index.html")
+    assert "Disallow" not in _read(out, "robots.txt")
+
+
+def test_indexnow_key_file_is_served_at_the_declared_location(tmp_path):
+    out, written = _build([_deal()], tmp_path)
+    name = indexnow.key_file()
+    assert name in written
+    # The engine fetches this file and compares it byte-for-byte with the key it
+    # was sent; anything else is a 403 and the whole submission is discarded.
+    assert _read(out, name) == indexnow.KEY
+    assert name not in _read(out, "sitemap.xml")
+
+
+def test_malformed_verification_token_is_dropped(mocker):
+    mocker.patch.dict("os.environ", {"GOOGLE_SITE_VERIFICATION": "../../etc/passwd"})
+    import importlib
+    reloaded = importlib.reload(site_builder)
+    try:
+        assert reloaded.GSC_VERIFICATION == ""
+    finally:
+        importlib.reload(site_builder)
 
 
 def _brand_deals(brand, n, start=0):

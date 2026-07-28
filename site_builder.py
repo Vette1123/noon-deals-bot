@@ -22,6 +22,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
+import indexnow
 from archive import ARCHIVE_FILE, load_archive, prune_archive
 from categories import category_label
 from telegram_poster import with_affiliate_utms
@@ -42,6 +43,22 @@ SITE_BASE_URL = (
     else os.environ.get("SITE_BASE_URL", "https://vette1123.github.io/noon-deals-bot")
 ).rstrip("/")
 SITE_NAME = os.environ.get("SITE_NAME", "ديلز مصر")
+# Search Console ownership token (the `googleXXXX.html` file Google hands out).
+# Generated HTML is never committed, so the file has to be re-emitted on every
+# build — drop it once and Google silently un-verifies the property, taking the
+# index-coverage and query reports with it. Content is byte-exact on purpose:
+# Google refuses a modified file. A fork verifying its own property overrides
+# GOOGLE_SITE_VERIFICATION with its own filename; any other value (e.g. "off")
+# is rejected below and no file is written. Empty means "unset", not "disable",
+# because an unset GitHub Actions variable arrives as an empty string.
+GSC_VERIFICATION = (
+    os.environ.get("GOOGLE_SITE_VERIFICATION", "").strip() or "google7349409b25f0c975.html"
+)
+# The token ends up in a filename, and a filename is a path. Same rule as SKUs.
+_GSC_RE = re.compile(r"^google[A-Za-z0-9_-]+\.html$")
+if GSC_VERIFICATION and not _GSC_RE.fullmatch(GSC_VERIFICATION):
+    print(f"Ignoring malformed GOOGLE_SITE_VERIFICATION: {GSC_VERIFICATION!r}")
+    GSC_VERIFICATION = ""
 CHANNEL_HANDLE = os.environ.get("TELEGRAM_CHANNEL_ID", "@noon_hot_deals").strip().lstrip("@")
 # Only a public @handle has a t.me page. A numeric chat ID would render a dead
 # link on every page of the site, which is worse than showing no button.
@@ -1061,6 +1078,18 @@ def build_site(archive: dict, out_dir: str = OUT_DIR, now: datetime | None = Non
     if SITE_DOMAIN:
         _write(out_dir, "CNAME", f"{SITE_DOMAIN}\n")
         written.append("CNAME")
+    if GSC_VERIFICATION:
+        # Nothing links to it and it stays out of sitemap.xml, so the thin page
+        # never competes with a deal page for a query. robots.txt must keep
+        # allowing it — Disallow here would break verification itself.
+        _write(out_dir, GSC_VERIFICATION, f"google-site-verification: {GSC_VERIFICATION}")
+        written.append(GSC_VERIFICATION)
+    # IndexNow proves ownership by serving the key back at this path. It has to be
+    # rewritten every build for the same reason the Google file does, and it must
+    # ship *before* the ping — a key the crawler cannot fetch answers 403.
+    if indexnow.key_file():
+        _write(out_dir, indexnow.key_file(), indexnow.KEY)
+        written.append(indexnow.key_file())
 
     hubs: list[tuple[str, str]] = []
     brands = _brand_index(deals)

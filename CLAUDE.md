@@ -170,6 +170,18 @@ Anything that publishes a product URL goes through it, or that traffic is unpaid
 - **Keep the affiliate disclosure in the footer and keep the palette off noon's yellow.**
   Looking like the merchant is an affiliate-account-termination risk, not a style choice.
 - Outbound product links are `rel="nofollow sponsored noopener"`.
+- **Two ownership files are rewritten on every build** — `google…​.html` (Search Console)
+  and `<key>.txt` (IndexNow). Generated HTML is never committed, so dropping either from
+  `build_site` silently un-verifies the property on the next deploy. Both are byte-exact:
+  Google refuses a modified file, and IndexNow compares the key file to the key it was
+  sent. Neither goes in `sitemap.xml`, and `robots.txt` must keep allowing them —
+  a `Disallow` breaks verification itself. Both tokens are public, not secrets.
+- [indexnow.py](indexnow.py) pings **after** the Pages deploy, never before: the crawlers
+  fetch within minutes and a URL that still 404s gets dropped. It submits only what the
+  run changed (front page + new deal pages + the hubs they landed on) — firing the whole
+  archive every four hours is what earns an HTTP 429. It swallows its own errors like
+  the Facebook poster does. Google does not consume IndexNow; for Google the lever is
+  still `sitemap.xml` + `lastmod`.
 - Deal filenames come from the SKU and are validated against `^[A-Za-z0-9_-]+$` — a SKU
   is scraped data, and `../../` in a filename writes outside the output directory.
 - **A deal page must never start 404ing.** Deals that age out become `noindex`
