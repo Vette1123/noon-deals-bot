@@ -239,6 +239,31 @@ def test_deal_pages_declare_themselves_as_products(tmp_path):
     assert '<link rel="alternate" hreflang="ar-eg"' in page
 
 
+def test_theme_follows_the_device_but_an_explicit_choice_wins(tmp_path):
+    out, _ = _build([_deal()], tmp_path)
+    page = _read(out, "index.html")
+    # Device preference applies unless the reader has explicitly picked light.
+    assert '@media (prefers-color-scheme:dark){\n  :root:not([data-theme="light"])' in page
+    assert ':root[data-theme="dark"]{' in page
+
+
+def test_theme_is_applied_before_paint_to_avoid_a_flash(tmp_path):
+    out, _ = _build([_deal()], tmp_path)
+    for path in ("index.html", "deals/N1A.html"):
+        page = _read(out, path)
+        head = page.split("</head>", 1)[0]
+        assert "localStorage.getItem('theme')" in head
+        # Still no external requests: the toggle is inline, not a bundle.
+        assert "<script src=" not in page
+
+
+def test_theme_toggle_is_hidden_until_javascript_reveals_it(tmp_path):
+    out, _ = _build([_deal()], tmp_path)
+    page = _read(out, "index.html")
+    assert '<button type="button" id="theme-toggle" class="theme" hidden>' in page
+    assert "b.hidden=false" in page
+
+
 def test_missing_image_does_not_emit_an_empty_img_src(tmp_path):
     # <img src=""> makes the browser re-request the page itself.
     out, _ = _build([_deal(image_url=None)], tmp_path)

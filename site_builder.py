@@ -139,6 +139,30 @@ def _summary(deal: dict) -> str:
 
 # ── Page chrome ───────────────────────────────────────────────────────────────
 
+# Inline and first in <head>: it has to run before the page paints or a reader who
+# picked light gets a dark flash on every navigation. Inline also means no extra
+# request, which is the reason the rest of the site has no JavaScript at all.
+_THEME_BOOT_JS = (
+    "(function(){try{var t=localStorage.getItem('theme');"
+    "if(t==='dark'||t==='light')document.documentElement.setAttribute('data-theme',t);}"
+    "catch(e){}})();"
+)
+
+# Cycles device preference -> light -> dark. The button starts hidden and is only
+# revealed here, so it never sits there dead when JavaScript is unavailable.
+_THEME_TOGGLE_JS = (
+    "(function(){var b=document.getElementById('theme-toggle');if(!b)return;"
+    "var L={auto:'تلقائي',light:'فاتح',dark:'داكن'},order=['auto','light','dark'];"
+    "function cur(){try{return localStorage.getItem('theme')||'auto';}catch(e){return 'auto';}}"
+    "function paint(m){b.textContent='المظهر: '+L[m];}"
+    "function apply(m){var r=document.documentElement;"
+    "if(m==='auto'){r.removeAttribute('data-theme');}else{r.setAttribute('data-theme',m);}"
+    "try{if(m==='auto'){localStorage.removeItem('theme');}else{localStorage.setItem('theme',m);}}"
+    "catch(e){}paint(m);}"
+    "b.hidden=false;paint(cur());"
+    "b.addEventListener('click',function(){apply(order[(order.indexOf(cur())+1)%3]);});})();"
+)
+
 _CSS = """
 *,*::before,*::after{box-sizing:border-box}
 :root{
@@ -146,12 +170,20 @@ _CSS = """
   --accent:#c81e4a; --accent-ink:#fff; --accent-soft:#fdeaef;
   --radius:14px; --shadow:0 1px 2px rgba(20,24,28,.06),0 8px 24px rgba(20,24,28,.05);
 }
+/* Dark tokens live in one place and are applied two ways: by the device
+   preference unless the reader has explicitly chosen light, or by an explicit
+   choice stored in localStorage. `data-theme` always wins over the device. */
 @media (prefers-color-scheme:dark){
-  :root{
+  :root:not([data-theme="light"]){
     --bg:#101315; --surface:#181c20; --line:#272d33; --ink:#eef1f4; --muted:#9aa4ad;
     --accent:#ff5c7f; --accent-ink:#1a0a10; --accent-soft:#2a1219;
     --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.3);
   }
+}
+:root[data-theme="dark"]{
+  --bg:#101315; --surface:#181c20; --line:#272d33; --ink:#eef1f4; --muted:#9aa4ad;
+  --accent:#ff5c7f; --accent-ink:#1a0a10; --accent-soft:#2a1219;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.3);
 }
 html{-webkit-text-size-adjust:100%}
 body{
@@ -176,6 +208,12 @@ img{max-width:100%;display:block}
 .cta:hover{filter:brightness(1.06)}
 .cta:active{transform:translateY(1px)}
 .cta.ghost{background:transparent;color:var(--accent);border:1.5px solid var(--accent)}
+.theme{background:transparent;color:var(--muted);border:1px solid var(--line);
+  border-radius:999px;padding:9px 16px;font:inherit;font-size:14px;font-weight:600;
+  cursor:pointer;transition:border-color .15s ease,color .15s ease}
+.theme:hover{border-color:var(--accent);color:var(--accent)}
+.theme:active{transform:translateY(1px)}
+.actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 h1{font-size:clamp(22px,3.4vw,32px);line-height:1.25;margin:0 0 6px;letter-spacing:-.02em}
 h2{font-size:19px;margin:0 0 14px;letter-spacing:-.01em}
 section{padding-block:26px}
@@ -279,6 +317,7 @@ def _page(*, title: str, description: str, canonical: str, body: str,
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<script>{_THEME_BOOT_JS}</script>
 <title>{_esc(title)}</title>
 <meta name="description" content="{_esc(description)}">
 <link rel="canonical" href="{_esc(canonical)}">
@@ -307,7 +346,10 @@ def _page(*, title: str, description: str, canonical: str, body: str,
     <a class="brand" href="{up}index.html">ديلز <span>مصر</span></a>
     <p class="tagline">أقوى خصومات نون مصر، مُحدَّثة كل ٤ ساعات</p>
   </div>
-  {subscribe}
+  <div class="actions">
+    <button type="button" id="theme-toggle" class="theme" hidden>المظهر: تلقائي</button>
+    {subscribe}
+  </div>
 </div></header>
 {body}
 <footer><div class="wrap">
@@ -316,6 +358,7 @@ def _page(*, title: str, description: str, canonical: str, body: str,
   الأسعار تتغير باستمرار، والسعر المعتمد هو المعروض على نون وقت الشراء.</p>
   {subscribe_ghost}
 </div></footer>
+<script>{_THEME_TOGGLE_JS}</script>
 </body>
 </html>
 """

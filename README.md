@@ -50,7 +50,7 @@ GitHub Actions (cron, 6×/day)
 
 ## The static site
 
-Every posted deal is archived to [deals.json](deals.json) and rendered into a small Arabic (RTL) site: a front page, one page per deal with `Product` structured data, `sitemap.xml`, `robots.txt` and an RSS feed. No JavaScript, no web fonts, no external requests — search traffic arrives on mobile data, and page speed is ranking.
+Every posted deal is archived to [deals.json](deals.json) and rendered into a small Arabic (RTL) site: a front page, one page per deal with `Product` structured data, `sitemap.xml`, `robots.txt` and an RSS feed. No web fonts, no CSS files, no script bundles — search traffic arrives on mobile data, and page speed is ranking. It follows the device's light/dark setting, with a toggle that remembers an explicit choice.
 
 It matters because it earns **without an audience**: a Telegram post reaches today's subscribers, a page that ranks reaches everyone who searches. Enable it once under *Settings → Pages → Source: GitHub Actions*; the `publish-site` job does the rest on every run.
 

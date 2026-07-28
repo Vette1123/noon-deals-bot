@@ -119,9 +119,16 @@ Anything that publishes a product URL goes through it, or that traffic is unpaid
 
 ## The static site (rules that are load-bearing)
 
-- **No JavaScript, no web fonts, no external CSS.** Search traffic lands on Egyptian
-  mobile data; every request is LCP and LCP is ranking. Arabic type comes from the
-  system stack. There is a test asserting this — do not "improve" it with a font CDN.
+- **No external requests at all: no web fonts, no CSS files, no script bundles.** Search
+  traffic lands on Egyptian mobile data; every request is LCP and LCP is ranking. Arabic
+  type comes from the system stack. There is a test asserting this — do not "improve" it
+  with a font CDN.
+- The **only** JavaScript is the theme toggle, inlined in two small blocks. The one in
+  `<head>` must stay first and inline: it applies the stored theme before paint, and
+  moving it or deferring it brings back the light/dark flash on every navigation.
+- Theme resolution order is device preference, then an explicit choice. The dark tokens
+  are duplicated on purpose (`@media` + `:root[data-theme="dark"]`) because CSS has no
+  way to reuse a block across both without a preprocessor.
 - **Never inline scraped text into a `<script>` without `_ld_json`.** Product names are
   written by marketplace sellers. `html.escape` cannot be used inside JSON-LD, so
   `_ld_json` escapes `< > &` as `\uXXXX`, which is valid JSON and cannot close the tag.
