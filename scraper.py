@@ -6,6 +6,8 @@ import random
 from curl_cffi import requests as cffi_requests
 from bs4 import BeautifulSoup
 
+from categories import FEED_CODES
+
 # Optional SOCKS5/HTTP proxy for noon.com traffic only (not Telegram).
 # In CI we route through Cloudflare WARP to escape datacenter-IP reputation
 # checks by Akamai — see .github/workflows/bot.yml.
@@ -17,44 +19,84 @@ _PROXIES = {"http": _PROXY_URL, "https": _PROXY_URL} if _PROXY_URL else None
 # to `sort[by]=popularity`). The closest durable substitute is the
 # `min_offer_price` facet ("Price drop"), which only returns items currently at
 # their lowest price in a year. Real discount filtering happens in filters.py.
-DEALS_URL = (
-    "https://www.noon.com/egypt-en/all-products/"
-    "?limit=50&f[min_offer_price]=365_days&sort[by]=popularity&sort[dir]=desc"
-)
+DEALS_QUERY = "?limit=50&f[min_offer_price]=365_days&sort[by]=popularity&sort[dir]=desc"
+
+# Scraping happens one category at a time rather than out of `all-products`, for
+# two reasons (both measured 2026-07-28):
+#
+# 1. `all-products` reports `nbPages:10` against 109k hits. Past page ~10 it
+#    re-serves what earlier pages already returned, so the old MAX_PAGES=60
+#    cursor spent five sixths of its cycle re-reading the same ~500 products.
+# 2. The payload carries no category field per item, but commission rates are
+#    per category and range from 2% to 10%. Asking for one category means we
+#    know what every product in the response pays — see [categories.py].
+#
+# `f[category]=…` on `all-products` returns nothing when combined with
+# `min_offer_price`; the browse *path* is what works.
+PAGES_PER_FEED = 10
+# Requests per run. Six feeds a run × 6 runs a day walks the whole rotation in
+# about ten days, against a 21-day repost cooldown.
+FETCHES_PER_RUN = 6
 
 
-# The `min_offer_price=365_days` result set is ~109k items (2,000+ pages), so the
-# old MAX_PAGES=10 meant the channel recycled the same ~500 products roughly once
-# a day. 60 pages ≈ 3,000 products ≈ a 5-day cycle at 6 runs/day.
-MAX_PAGES = 60
-PAGES_PER_RUN = 2
+def feed_url(category: str, page: int = 1) -> str:
+    url = f"https://www.noon.com/egypt-en/{category}/{DEALS_QUERY}"
+    return url if page == 1 else f"{url}&page={page}"
 
 
-def fetch_products(start_page: int = 1) -> list[dict]:
-    """Fetch PAGES_PER_RUN pages starting from start_page."""
+def feed_tasks() -> list[tuple[str, int]]:
+    """The full (category, page) rotation, page-major.
+
+    Page 1 of every category comes before page 2 of any of them: the first page
+    of a category holds better deals than the seventh page of another one.
+    """
+    return [
+        (code, page)
+        for page in range(1, PAGES_PER_FEED + 1)
+        for code in FEED_CODES
+    ]
+
+
+def fetch_products(start_task: int = 0) -> list[dict]:
+    """Fetch FETCHES_PER_RUN feed pages, starting at `start_task` in the rotation.
+
+    Each product is tagged with the category it was found under, which is the
+    only way to know what it pays.
+    """
+    tasks = feed_tasks()
     all_products: list[dict] = []
     seen_skus: set[str] = set()
 
-    for page in range(start_page, start_page + PAGES_PER_RUN):
-        html = _fetch_html(page)
+    for offset in range(FETCHES_PER_RUN):
+        category, page = tasks[(start_task + offset) % len(tasks)]
+        try:
+            html = _fetch_html(feed_url(category, page))
+        except RuntimeError as e:
+            # One dead category must not cost the whole run — noon retires browse
+            # paths without warning. A run that fetches nothing still fails hard,
+            # back in main.py, because `all_products` stays empty.
+            print(f"  {category} p{page}: {e}")
+            continue
         products = parse_products_from_html(html)
 
         new_count = 0
         for p in products:
             if p["sku"] not in seen_skus:
                 seen_skus.add(p["sku"])
+                p["category"] = category
                 all_products.append(p)
                 new_count += 1
 
-        print(f"  Page {page}: {len(products)} products ({new_count} new)")
-
-        if len(products) == 0:
-            print(f"  Page {page} empty — reached end of results.")
-            break
+        print(f"  {category} p{page}: {len(products)} products ({new_count} new)")
 
     if not all_products:
         print("Warning: Scraped 0 products. Page structure may have changed or we reached the end.")
     return all_products
+
+
+def next_task(start_task: int) -> int:
+    """Advance the rotation cursor, wrapping at the end."""
+    return (start_task + FETCHES_PER_RUN) % len(feed_tasks())
 
 
 # Impersonation targets to rotate across on retries (newest first).
@@ -63,7 +105,7 @@ def fetch_products(start_page: int = 1) -> list[dict]:
 _IMPERSONATE_POOL = ["chrome146", "chrome142", "chrome136", "chrome131"]
 
 
-def _fetch_html(page: int = 1, max_attempts: int = 4) -> str:
+def _fetch_html(url: str, max_attempts: int = 4) -> str:
     """Fetch a Noon deals page using Chrome TLS impersonation (curl_cffi).
 
     Retries on Akamai 403s (transient bot-check) and 5xx/network errors
@@ -73,7 +115,6 @@ def _fetch_html(page: int = 1, max_attempts: int = 4) -> str:
     cookie is set before the deals URL is hit — a cold request to a deep
     filtered URL is a classic bot signal.
     """
-    url = DEALS_URL if page == 1 else f"{DEALS_URL}&page={page}"
     last_err: str | None = None
 
     if _PROXIES:
@@ -107,7 +148,7 @@ def _fetch_html(page: int = 1, max_attempts: int = 4) -> str:
                     # block, not as a page, or we'd "successfully" parse 0 products.
                     last_err = f"Akamai JS challenge ({len(resp.text):,} bytes)"
                 elif resp.ok:
-                    print(f"  Page {page}: fetched {len(resp.text):,} bytes ({impersonate})")
+                    print(f"  fetched {len(resp.text):,} bytes ({impersonate})")
                     return resp.text
                 else:
                     last_err = f"HTTP {resp.status_code}: {resp.text[:200]}"
@@ -115,11 +156,11 @@ def _fetch_html(page: int = 1, max_attempts: int = 4) -> str:
                 if 400 <= resp.status_code < 500 and resp.status_code != 403:
                     break
 
-            print(f"  Page {page} attempt {attempt}/{max_attempts} failed ({impersonate}): {last_err}")
+            print(f"  attempt {attempt}/{max_attempts} failed ({impersonate}): {last_err}")
             if attempt < max_attempts:
                 time.sleep(2 * attempt + random.uniform(0.5, 1.5))
 
-    raise RuntimeError(f"Fetch failed for page {page} after {max_attempts} attempts: {last_err}")
+    raise RuntimeError(f"fetch failed after {max_attempts} attempts: {last_err}")
 
 
 _CHALLENGE_MARKERS = ("sec-if-cpt-container", "_sec_bot_detect", "Powered and protected by")
@@ -483,6 +524,9 @@ def _normalize_item(item: dict) -> dict | None:
         "rating": round(float(rating), 1) if rating else None,
         "rating_count": int(rating_count) if rating_count else None,
         "store_name": item.get("store_name") or "",
+        # Filled in by fetch_products from the feed the item came out of — the
+        # payload itself has no category field, and the rate depends on it.
+        "category": "",
         "estimated_delivery": re.sub(r"<[^>]+>", "", item.get("estimated_delivery_date") or "").strip(),
         # Trust signals — they drive conversion, and conversion is what pays.
         "fulfilled_by_noon": "fbn" in flags,

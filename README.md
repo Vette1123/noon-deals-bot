@@ -21,16 +21,16 @@ Auto-posts the best discounted products from [noon.com Egypt](https://www.noon.c
 GitHub Actions (cron, 6×/day)
         │
         ▼
-   fetch 2 pages of deals  ── curl_cffi + Chrome fingerprint ──▶  noon.com
-        │
+   fetch 6 category feeds  ── curl_cffi + Chrome fingerprint ──▶  noon.com
+        │                     (rotating ~34 categories × 10 pages)
         ▼
-   filter new deals (≥5% off, not already posted)
+   filter, then rank by expected commission in EGP
         │
         ▼
    post to Telegram channel with:
      • product image
      • Arabic-formatted card
-     • tap-to-copy coupon code (e.g. gado1996)
+     • tap-to-copy coupon code (e.g. gado)
      • "Buy now" button → noon.com product URL + affiliate UTMs
         │
         ▼
@@ -44,15 +44,24 @@ GitHub Actions (cron, 6×/day)
 
 **Attribution model:** two channels, both message-side, neither needs a login. Every "Buy now" link carries the affiliate campaign UTMs, and the message body shows a tap-to-copy coupon code that users paste at noon's checkout.
 
-**What gets posted:** at least **25% off**, at least **EGP 150**, and not rated below 3.5 by 20+ buyers. Survivors are ranked by a `deal_score` (discount + rating + basket value + trust flags), deduplicated by name, capped at **2 per seller**, and the top **12** go out. Commission is a percentage of basket value, so cheap deep-discount filler earns nothing and only costs subscribers.
+**What gets posted:** at least **25% off**, at least **EGP 150**, not rated below 3.5 by 20+ buyers, and not unbranded-and-unreviewed filler. Survivors are ranked by **expected commission in pounds** — `min(cap, category rate × price)` times conversion odds — deduplicated by name, capped at **2 per seller**. The top **12** go to Telegram; the top **20** are archived for the site.
 
-**Page cursor:** each run scrapes 2 pages and advances, wrapping at page 60 (~3,000 products, a 5-day cycle). A SKU already posted is on cooldown for **21 days**.
+Rates are per category and payout is **capped at AED 50 per item**, which makes expensive electronics (laptops 3%, mobiles 2%) the worst thing on the board and mid-priced beauty, toys and small appliances (8%) the best. See [docs/MONETIZATION.md](docs/MONETIZATION.md) for the full table.
+
+**Feed cursor:** noon's category browse paths are real product lists; each run walks 6 of them and advances through a rotation of ~34 categories × 10 pages (~14,000 products, roughly a 10-day cycle). A SKU already posted is on cooldown for **21 days**.
 
 ## The static site
 
-Every posted deal is archived to [deals.json](deals.json) and rendered into a small Arabic (RTL) site: a front page, one page per deal with `Product` structured data, `sitemap.xml`, `robots.txt` and an RSS feed. No web fonts, no CSS files, no script bundles — search traffic arrives on mobile data, and page speed is ranking. It follows the device's light/dark setting, with a toggle that remembers an explicit choice.
+Every deal is archived to [deals.json](deals.json) and rendered into an Arabic (RTL) site: a front page, one page per deal with `Product` structured data, a hub per **category** and per **brand**, a directory of each, a paginated archive, `sitemap.xml`, `robots.txt` and an RSS feed. No web fonts, no CSS files, no script bundles — search traffic arrives on mobile data, and page speed is ranking. It follows the device's light/dark setting, with a toggle that remembers an explicit choice.
 
-It matters because it earns **without an audience**: a Telegram post reaches today's subscribers, a page that ranks reaches everyone who searches. Enable it once under *Settings → Pages → Source: GitHub Actions*; the `publish-site` job does the rest on every run.
+It matters because it earns **without an audience**: a Telegram post reaches today's subscribers, a page that ranks reaches everyone who searches.
+
+Two rules it will not break:
+
+- **Deal pages never 404.** A deal that ages out becomes a `noindex` tombstone linking on to its hubs, because a URL that took four months to rank is the one thing here that cannot be rebuilt.
+- **`priceValidUntil` comes from when the deal was seen**, not from the build, so a rebuild never re-certifies an old price as current.
+
+Enable it once under *Settings → Pages → Source: GitHub Actions*; the `publish-site` job does the rest. To move it onto your own domain, set the `SITE_DOMAIN` repository variable and point the DNS at Pages — worth doing before it ranks, not after.
 
 Preview it locally:
 
@@ -68,13 +77,14 @@ See [docs/MONETIZATION.md](docs/MONETIZATION.md) for what earns, what is built, 
 | --- | --- |
 | [main.py](main.py) | Entry point — orchestrates fetch → filter → post |
 | [scraper.py](scraper.py) | Fetches & parses noon.com catalog pages (inline JS payload + fallbacks) |
-| [filters.py](filters.py) | Filters out already-posted SKUs, weak discounts and low-value items |
+| [filters.py](filters.py) | Filters out already-posted SKUs, weak discounts and filler; ranks by expected commission |
+| [categories.py](categories.py) | noon category codes, their commission rates, and their Arabic names |
 | [telegram_poster.py](telegram_poster.py) | Formats & posts product cards to Telegram (includes coupon line) |
-| [archive.py](archive.py) | Records posted deals into `deals.json` (30-day window) |
+| [archive.py](archive.py) | Records deals into `deals.json` (1-year window, then tombstoned) |
 | [site_builder.py](site_builder.py) | Renders `deals.json` into the static site in `public/` |
 | [facebook_poster.py](facebook_poster.py) | Optional Facebook Page crosspost (no-op without secrets) |
 | [posted.json](posted.json) | `{sku: ISO timestamp}` — per-SKU repost cooldown |
-| [state.json](state.json) | `{"next_page": N}` — pagination cursor |
+| [state.json](state.json) | `{"next_task": N}` — cursor into the category-feed rotation |
 | [deals.json](deals.json) | The published-deal archive the site is built from |
 
 ## Local setup
@@ -97,7 +107,7 @@ python main.py             # real run
 | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | Bot that posts to the channel |
 | `TELEGRAM_CHANNEL_ID` | Channel handle (e.g. `@noon_hot_deals`) |
-| `NOON_COUPON_CODE` | *(optional)* Your noon influencer coupon. Defaults to `gado1996`. |
+| `NOON_COUPON_CODE` | *(optional)* Your noon influencer coupon. Defaults to `gado`. |
 | `FACEBOOK_PAGE_ID` | *(optional)* Enables the Facebook crosspost. Skipped when unset. |
 | `FACEBOOK_PAGE_TOKEN` | *(optional)* Long-lived Page token with `pages_manage_posts`. |
 

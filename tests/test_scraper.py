@@ -1,4 +1,5 @@
 import json
+import scraper
 from scraper import _is_akamai_challenge, parse_products_from_html
 
 MOCK_NEXT_DATA = {
@@ -131,3 +132,45 @@ def test_parse_calculates_discount_if_missing():
     full_html = f'<script id="__NEXT_DATA__" type="application/json">{html}</script>'
     products = parse_products_from_html(full_html)
     assert products[0]["discount_pct"] == 25
+
+
+# ── Feed rotation ─────────────────────────────────────────────────────────────
+
+def test_every_category_is_visited_before_any_second_page():
+    tasks = scraper.feed_tasks()
+    first_round = tasks[:len(scraper.FEED_CODES)]
+    # Page 1 of a category beats page 7 of another one, so breadth comes first.
+    assert {page for _, page in first_round} == {1}
+    assert len({code for code, _ in first_round}) == len(scraper.FEED_CODES)
+
+
+def test_the_cursor_wraps_instead_of_running_off_the_end():
+    total = len(scraper.feed_tasks())
+    assert scraper.next_task(total - scraper.FETCHES_PER_RUN) == 0
+    assert scraper.next_task(total - 1) < total
+
+
+def test_products_are_tagged_with_the_feed_they_came_from(mocker):
+    mocker.patch.object(scraper, "FETCHES_PER_RUN", 1)
+    mocker.patch.object(scraper, "_fetch_html", return_value="<html></html>")
+    mocker.patch.object(scraper, "parse_products_from_html",
+                        return_value=[{"sku": "A", "name": "x"}])
+    products = scraper.fetch_products(start_task=0)
+    assert products[0]["category"] == scraper.feed_tasks()[0][0]
+
+
+def test_one_dead_category_does_not_cost_the_whole_run(mocker):
+    # noon retires browse paths without warning. A run that fetches nothing
+    # still fails hard, in main.py, because the product list stays empty.
+    mocker.patch.object(scraper, "FETCHES_PER_RUN", 2)
+    mocker.patch.object(scraper, "_fetch_html",
+                        side_effect=[RuntimeError("gone"), "<html></html>"])
+    mocker.patch.object(scraper, "parse_products_from_html",
+                        return_value=[{"sku": "A", "name": "x"}])
+    assert len(scraper.fetch_products(start_task=0)) == 1
+
+
+def test_feed_urls_keep_the_price_drop_filter_on_every_page():
+    assert "f[min_offer_price]=365_days" in scraper.feed_url("beauty/fragrance", 1)
+    assert scraper.feed_url("beauty/fragrance", 3).endswith("&page=3")
+    assert "/egypt-en/beauty/fragrance/" in scraper.feed_url("beauty/fragrance", 1)

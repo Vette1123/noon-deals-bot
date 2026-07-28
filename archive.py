@@ -16,21 +16,34 @@ from datetime import datetime, timedelta, timezone
 from telegram_poster import with_affiliate_utms
 
 ARCHIVE_FILE = "deals.json"
-# A month of history. Long enough for search engines to find a page and send
-# traffic, short enough that deals.json stays a few hundred KB in git.
-KEEP_DAYS = 30
-# Hard ceiling regardless of age. At 12 posts × 6 runs a day, 30 days is ~2,100
-# deals; this only bites if the post cap is raised a lot.
-MAX_DEALS = 3000
+# A year of history, not the month this started with. Google takes two to four
+# months to trust a new domain, so a 30-day window deleted every page at roughly
+# the moment it began to rank — the site could never accumulate anything.
+KEEP_DAYS = 365
+# Hard ceiling regardless of age, whichever binds first.
+MAX_DEALS = 12000
+# Deals that fall out of the window are not forgotten, only stripped down to a
+# tombstone (see `_retire`). A URL that once ranked must never start 404ing.
+#
+# This is a ceiling, not a promise of forever: every tombstone is still a built
+# HTML file with the site's CSS inlined in it, so 50,000 of them is a few hundred
+# MB of artifact per deploy. At ~120 archived deals a day that is over a year of
+# runway. If it ever binds, give tombstones their own minimal template rather
+# than lowering this — the whole point is that the URL survives.
+MAX_RETIRED = 50000
 
 # Only what the site actually renders. Copying the whole scraped item would bloat
 # the file and commit noon's internal fields into git forever.
 _FIELDS = (
-    "sku", "name", "brand", "store_name", "image_url",
+    "sku", "name", "brand", "category", "store_name", "image_url",
     "sale_price", "original_price", "discount_pct",
     "rating", "rating_count",
     "fulfilled_by_noon", "free_delivery", "is_bestseller",
 )
+
+# Enough to keep the URL alive and point the reader somewhere useful. Prices are
+# deliberately dropped: a year-old price is not information, it is a wrong answer.
+_RETIRED_FIELDS = ("sku", "name", "brand", "category", "posted_at")
 
 
 def _parse_stamp(value, fallback: datetime) -> datetime:
@@ -52,7 +65,7 @@ def deal_entry(product: dict, now: datetime | None = None) -> dict:
 
 
 def record_deal(archive: dict, product: dict, now: datetime | None = None) -> None:
-    """Add a freshly posted deal, newest first, one entry per SKU."""
+    """Add a freshly seen deal, newest first, one entry per SKU."""
     entry = deal_entry(product, now=now)
     deals = archive.setdefault("deals", [])
     sku = entry.get("sku")
@@ -60,19 +73,59 @@ def record_deal(archive: dict, product: dict, now: datetime | None = None) -> No
         # Re-posting after the cooldown refreshes the existing page instead of
         # creating a duplicate one competing with itself in search results.
         deals[:] = [d for d in deals if d.get("sku") != sku]
+        # A deal coming back is alive again, so it stops being a tombstone.
+        retired = archive.get("retired")
+        if isinstance(retired, list):
+            retired[:] = [d for d in retired if d.get("sku") != sku]
     deals.insert(0, entry)
 
 
+def _retire(deal: dict) -> dict:
+    return {field: deal.get(field) for field in _RETIRED_FIELDS}
+
+
 def prune_archive(archive: dict, now: datetime | None = None) -> dict:
-    """Drop deals older than KEEP_DAYS, newest first, capped at MAX_DEALS."""
+    """Age deals out of the live set without ever dropping their URL.
+
+    Anything past KEEP_DAYS, or past the MAX_DEALS ceiling, becomes a tombstone:
+    the site keeps serving that path as a small "this offer ended" page that
+    links on to the brand and category hubs. Deleting the entry instead would
+    404 every link and every search result the page had earned.
+    """
     now = now or datetime.now(timezone.utc)
     cutoff = now - timedelta(days=KEEP_DAYS)
-    deals = [
-        d for d in archive.get("deals", [])
-        if isinstance(d, dict) and _parse_stamp(d.get("posted_at"), now) > cutoff
+    stamp = lambda d: _parse_stamp(d.get("posted_at"), now)  # noqa: E731
+
+    live, expired = [], []
+    for deal in archive.get("deals", []):
+        if not isinstance(deal, dict):
+            continue
+        (live if stamp(deal) > cutoff else expired).append(deal)
+
+    live.sort(key=stamp, reverse=True)
+    expired.extend(live[MAX_DEALS:])
+    live = live[:MAX_DEALS]
+
+    live_skus = {d.get("sku") for d in live}
+    retired = [_retire(d) for d in expired]
+    retired += [
+        d for d in archive.get("retired", [])
+        if isinstance(d, dict) and d.get("sku") not in live_skus
     ]
-    deals.sort(key=lambda d: _parse_stamp(d.get("posted_at"), now), reverse=True)
-    return {"deals": deals[:MAX_DEALS]}
+    seen: set = set()
+    deduped = []
+    for entry in retired:
+        sku = entry.get("sku")
+        if sku in seen or sku in live_skus:
+            continue
+        seen.add(sku)
+        deduped.append(entry)
+    deduped.sort(key=stamp, reverse=True)
+
+    pruned = {"deals": live}
+    if deduped:
+        pruned["retired"] = deduped[:MAX_RETIRED]
+    return pruned
 
 
 def load_archive(path: str = ARCHIVE_FILE) -> dict:

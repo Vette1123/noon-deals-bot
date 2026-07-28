@@ -34,7 +34,7 @@ def _product(sku="N1A", **overrides):
 def test_recorded_url_carries_the_affiliate_utms():
     archive = {"deals": []}
     record_deal(archive, _product(), now=NOW)
-    assert "utm_medium=AFFc944753cc349" in archive["deals"][0]["url"]
+    assert "utm_medium=AFFccacc092d97d" in archive["deals"][0]["url"]
     assert archive["deals"][0]["posted_at"] == NOW.isoformat()
 
 
@@ -55,20 +55,51 @@ def test_reposted_sku_refreshes_its_entry_instead_of_duplicating():
     assert archive["deals"][0]["posted_at"] == NOW.isoformat()
 
 
-def test_prune_drops_deals_past_the_retention_window():
+def test_deals_past_the_window_are_retired_not_deleted():
+    # Deleting the entry would 404 the URL, and a URL that took four months to
+    # rank is the one thing here that cannot be rebuilt.
     archive = {"deals": []}
     record_deal(archive, _product("KEEP"), now=NOW - timedelta(days=2))
-    record_deal(archive, _product("DROP"), now=NOW - timedelta(days=KEEP_DAYS + 1))
+    record_deal(archive, _product("OLD"), now=NOW - timedelta(days=KEEP_DAYS + 1))
     pruned = prune_archive(archive, now=NOW)
     assert [d["sku"] for d in pruned["deals"]] == ["KEEP"]
+    assert [d["sku"] for d in pruned["retired"]] == ["OLD"]
 
 
-def test_prune_caps_total_size():
+def test_a_retired_entry_keeps_only_what_a_tombstone_needs():
+    archive = {"deals": []}
+    record_deal(archive, _product("OLD"), now=NOW - timedelta(days=KEEP_DAYS + 1))
+    entry = prune_archive(archive, now=NOW)["retired"][0]
+    assert entry["name"] and entry["brand"]
+    # A year-old price is not information, it is a wrong answer.
+    assert "sale_price" not in entry and "url" not in entry
+
+
+def test_prune_caps_total_size_and_retires_the_overflow():
     deals = [
         {"sku": f"S{i}", "posted_at": (NOW - timedelta(minutes=i)).isoformat()}
         for i in range(MAX_DEALS + 50)
     ]
-    assert len(prune_archive({"deals": deals}, now=NOW)["deals"]) == MAX_DEALS
+    pruned = prune_archive({"deals": deals}, now=NOW)
+    assert len(pruned["deals"]) == MAX_DEALS
+    assert len(pruned["retired"]) == 50
+
+
+def test_a_deal_that_comes_back_stops_being_a_tombstone():
+    archive = {"deals": [], "retired": [{"sku": "N1A", "name": "old"}]}
+    record_deal(archive, _product("N1A"), now=NOW)
+    assert archive["retired"] == []
+    pruned = prune_archive(archive, now=NOW)
+    assert [d["sku"] for d in pruned["deals"]] == ["N1A"]
+    assert "retired" not in pruned
+
+
+def test_retired_entries_are_never_duplicated_across_runs():
+    archive = {"deals": []}
+    record_deal(archive, _product("OLD"), now=NOW - timedelta(days=KEEP_DAYS + 1))
+    once = prune_archive(archive, now=NOW)
+    twice = prune_archive(once, now=NOW)
+    assert len(twice["retired"]) == 1
 
 
 def test_prune_sorts_newest_first_and_survives_junk_entries():

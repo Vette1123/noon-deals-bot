@@ -80,7 +80,7 @@ def test_markup_rejects_unsafe_coupon():
 def test_utms_appended_with_question_mark_when_no_query_string():
     out = with_affiliate_utms("https://www.noon.com/egypt-en/foo/N1A/p/")
     assert "?utm_campaign=" in out
-    assert "&utm_medium=AFFc944753cc349" in out
+    assert "&utm_medium=AFFccacc092d97d" in out
     assert "&utm_source=" in out
     assert "&adjust_deeplink_js=1" in out
 
@@ -125,7 +125,7 @@ def test_utms_handles_empty_url():
 
 def test_format_message_decorates_url_with_utms():
     msg = format_message(_product())
-    assert "utm_medium=AFFc944753cc349" in msg
+    assert "utm_medium=AFFccacc092d97d" in msg
     assert "utm_campaign=CMP2ce0b63a6a1anoon" in msg
 
 

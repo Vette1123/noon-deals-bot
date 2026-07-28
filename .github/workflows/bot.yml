@@ -129,6 +129,11 @@ jobs:
         env:
           # From configure-pages, so a custom domain later needs no code change.
           SITE_BASE_URL: ${{ steps.pages.outputs.base_url }}
+          # Set this variable (Settings > Secrets and variables > Actions >
+          # Variables) to move the site onto a domain you own. It writes the
+          # CNAME file and rewrites every absolute URL; also point the DNS at
+          # GitHub Pages. Worth doing before the site ranks, not after.
+          SITE_DOMAIN: ${{ vars.SITE_DOMAIN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
           NOON_COUPON_CODE: ${{ secrets.NOON_COUPON_CODE }}
         run: python site_builder.py

@@ -20,12 +20,25 @@ import json
 import os
 import re
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 
 from archive import ARCHIVE_FILE, load_archive, prune_archive
+from categories import category_label
 
 OUT_DIR = "public"
-SITE_BASE_URL = os.environ.get(
-    "SITE_BASE_URL", "https://vette1123.github.io/noon-deals-bot"
+# A custom domain is worth buying *before* the site ranks: ranking earned on a
+# github.io path cannot move with you, and a migration resets the clock. Setting
+# this writes the CNAME file Pages needs and rewrites every absolute URL.
+SITE_DOMAIN = os.environ.get("SITE_DOMAIN", "").strip().lower().lstrip(".")
+_DOMAIN_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")
+if SITE_DOMAIN and not _DOMAIN_RE.fullmatch(SITE_DOMAIN):
+    # A malformed CNAME takes the whole site off the internet until someone
+    # notices, so a bad value is ignored rather than published.
+    print(f"Ignoring malformed SITE_DOMAIN: {SITE_DOMAIN!r}")
+    SITE_DOMAIN = ""
+SITE_BASE_URL = (
+    f"https://{SITE_DOMAIN}" if SITE_DOMAIN
+    else os.environ.get("SITE_BASE_URL", "https://vette1123.github.io/noon-deals-bot")
 ).rstrip("/")
 SITE_NAME = os.environ.get("SITE_NAME", "ديلز مصر")
 CHANNEL_HANDLE = os.environ.get("TELEGRAM_CHANNEL_ID", "@noon_hot_deals").strip().lstrip("@")
@@ -44,22 +57,45 @@ SPOTLIGHT_DEALS = 4
 SPOTLIGHT_WINDOW_DAYS = 7
 FEED_ITEMS = 40
 RELATED_DEALS = 4
-# Structured-data prices go stale as noon re-prices. A week is honest and keeps
-# rich results from advertising a price the merchant no longer offers.
+# Structured-data prices go stale as noon re-prices. A week from when the deal
+# was *seen* — not from the build — or every rebuild would silently re-certify a
+# six-month-old price as current, which is a lie told to Google in a machine
+# format it trusts.
 PRICE_VALID_DAYS = 7
+# Past this, the page still earns (the affiliate link works, and "سعر X" is still
+# the query that brought the reader) but it stops presenting the price as today's.
+STALE_AFTER_DAYS = 14
+# Deals per page in the paginated archive. Without it, every deal below the first
+# 96 is reachable only from sitemap.xml, and a page nothing links to ranks like
+# a page nothing links to.
+DEALS_PER_PAGE = 60
+MAX_ARCHIVE_PAGES = 250
 
 _SKU_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _SLUG_STRIP_RE = re.compile(r"[^a-z0-9]+")
-# A brand needs a few deals before its own page is worth more than a thin-content
-# penalty. Below this the brand simply has no hub.
-MIN_DEALS_PER_BRAND = 3
+# Two is enough for a hub to beat the deal pages it collects. At one it *is* one
+# of them, competing with its own child for the same query.
+MIN_DEALS_PER_BRAND = 2
+MIN_DEALS_PER_CATEGORY = 3
 INDEX_BRANDS = 24
+BRAND_PAGE_DEALS = 96
+CATEGORY_PAGE_DEALS = 96
 
 
 # ── Formatting helpers ────────────────────────────────────────────────────────
 
 def _esc(value) -> str:
     return html.escape(str(value if value is not None else ""), quote=True)
+
+
+def _ltr(value) -> str:
+    """Isolate a number, date or percentage inside an Arabic sentence.
+
+    Without it bidi reorders the run against the surrounding text: `2026-07-28`
+    renders as `28-07-2026`, and `خصم 53%` puts the percent sign on the wrong
+    side of the digits. Both are wrong rather than merely ugly.
+    """
+    return f'<bdi dir="ltr">{_esc(value)}</bdi>'
 
 
 def _money(value) -> str:
@@ -122,6 +158,32 @@ def _brand_index(deals: list[dict]) -> dict[str, dict]:
         group = groups.setdefault(slug, {"name": deal["brand"], "deals": []})
         group["deals"].append(deal)
     return {s: g for s, g in groups.items() if len(g["deals"]) >= MIN_DEALS_PER_BRAND}
+
+
+def _category_index(deals: list[dict]) -> dict[str, dict]:
+    """Categories worth their own page: {slug: {"name":…, "deals":[…]}}.
+
+    "عروض العطور على نون مصر" is a query an Arabic shopper actually types. It is
+    also the one page type that keeps working when a brand only ever has one deal.
+    """
+    groups: dict[str, dict] = {}
+    for deal in deals:
+        label = category_label(deal.get("category"))
+        slug = _brand_slug(deal.get("category"))
+        if not label or not slug or not _deal_path(deal):
+            continue
+        group = groups.setdefault(slug, {"name": label, "deals": []})
+        group["deals"].append(deal)
+    return {s: g for s, g in groups.items() if len(g["deals"]) >= MIN_DEALS_PER_CATEGORY}
+
+
+def _is_stale(deal: dict, now: datetime) -> bool:
+    return _parse_stamp(deal.get("posted_at"), now) < now - timedelta(days=STALE_AFTER_DAYS)
+
+
+def _price_valid_until(deal: dict, now: datetime) -> str:
+    seen = _parse_stamp(deal.get("posted_at"), now)
+    return (seen + timedelta(days=PRICE_VALID_DAYS)).date().isoformat()
 
 
 def _title(deal: dict) -> str:
@@ -268,14 +330,35 @@ section:first-of-type{padding-block:26px 6px}
   padding:7px 14px;font-size:14px;font-weight:600;
   transition:border-color .15s ease,color .15s ease}
 .pill:hover{border-color:var(--accent);color:var(--accent)}
-.pill span{color:var(--muted);font-weight:500;font-size:12.5px;
-  font-variant-numeric:tabular-nums}
+/* The count is a separate fact from the name, so it reads as a separate object.
+   Same weight and colour as the label made it look like part of the brand. */
+.pill span{display:inline-block;min-width:24px;margin-inline-start:7px;
+  padding:1px 7px;border-radius:999px;background:var(--accent-soft);
+  color:var(--accent);font-weight:700;font-size:12px;line-height:1.6;
+  text-align:center;font-variant-numeric:tabular-nums}
+.pill:hover span{background:var(--accent);color:var(--accent-ink)}
 .buy{margin:20px 0 10px;display:flex;gap:10px;flex-wrap:wrap}
 .buy .cta{padding:13px 28px;font-size:16px}
 .coupon{margin:14px 0;font-size:14px}
 .coupon code{background:var(--accent-soft);color:var(--accent);font-weight:700;
   padding:4px 10px;border-radius:8px;font-size:15px;letter-spacing:.04em}
 .caveat{color:var(--muted);font-size:13px;margin:14px 0 0}
+.notice{border:1px solid var(--line);border-inline-start:3px solid var(--accent);
+  background:var(--surface);border-radius:var(--radius);padding:12px 14px;margin:0 0 16px;
+  font-size:14px}
+.notice strong{color:var(--accent)}
+.share{margin:18px 0 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.share span{color:var(--muted);font-size:13px}
+.share a{border:1px solid var(--line);background:var(--surface);border-radius:999px;
+  padding:6px 14px;font-size:13.5px;font-weight:600;
+  transition:border-color .15s ease,color .15s ease}
+.share a:hover{border-color:var(--accent);color:var(--accent)}
+.pager{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center;
+  padding-block:26px;font-size:14px}
+.pager a,.pager strong{border:1px solid var(--line);background:var(--surface);
+  border-radius:10px;padding:7px 14px;font-variant-numeric:tabular-nums}
+.pager strong{border-color:var(--accent);color:var(--accent)}
+.pager a:hover{border-color:var(--accent);color:var(--accent)}
 .more{margin:14px 0 0;font-size:14px;font-weight:600}
 .more a{color:var(--accent);border-bottom:1px solid transparent}
 .more a:hover{border-bottom-color:var(--accent)}
@@ -297,9 +380,15 @@ footer p{margin:0;max-width:62ch}
 """
 
 
+_ROBOTS_INDEX = "index,follow,max-image-preview:large,max-snippet:-1"
+# A tombstone has no price, no picture and nothing to say. It exists so an old
+# link does not 404. `follow` still passes its equity on to the hubs it links to.
+_ROBOTS_TOMBSTONE = "noindex,follow"
+
+
 def _page(*, title: str, description: str, canonical: str, body: str,
           depth: int, og_image: str = "", extra_head: str = "",
-          og_type: str = "website") -> str:
+          og_type: str = "website", robots: str = _ROBOTS_INDEX) -> str:
     """One complete HTML document. `depth` is how many folders deep the page is."""
     up = "../" * depth
     og = (
@@ -324,7 +413,7 @@ def _page(*, title: str, description: str, canonical: str, body: str,
 <link rel="alternate" hreflang="ar-eg" href="{_esc(canonical)}">
 <!-- max-image-preview:large is what makes these eligible for full-size thumbnails
      in Google results and Discover, which is most of the click-through. -->
-<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
+<meta name="robots" content="{_esc(robots)}">
 <meta name="theme-color" content="#f4f6f8" media="(prefers-color-scheme:light)">
 <meta name="theme-color" content="#101315" media="(prefers-color-scheme:dark)">
 <meta property="og:type" content="{_esc(og_type)}">
@@ -388,23 +477,34 @@ def _card(deal: dict, href: str, eager: bool) -> str:
 
 # ── Pages ─────────────────────────────────────────────────────────────────────
 
-def _brand_links_html(brands: dict[str, dict], prefix: str = "") -> str:
-    """Pill links to the brand hubs, biggest first."""
-    ranked = sorted(brands.items(), key=lambda kv: len(kv[1]["deals"]), reverse=True)
+def _hub_links_html(kind: str, groups: dict[str, dict], limit: int,
+                    all_label: str = "") -> str:
+    """Pill links to hub pages, biggest first, with a link to the full list."""
+    ranked = sorted(groups.items(), key=lambda kv: len(kv[1]["deals"]), reverse=True)
     pills = "".join(
-        f'<a class="pill" href="{prefix}brands/{_esc(slug)}.html">'
+        f'<a class="pill" href="{kind}/{_esc(slug)}.html">'
         f'{_esc(group["name"])} <span>{len(group["deals"])}</span></a>'
-        for slug, group in ranked[:INDEX_BRANDS]
+        for slug, group in ranked[:limit]
     )
+    if all_label and len(ranked) > limit:
+        pills += f'<a class="pill" href="{kind}/index.html">{_esc(all_label)}</a>'
     return f'<nav class="pills">{pills}</nav>'
 
 
-def _brand_html(slug: str, group: dict, now: datetime) -> str:
-    """A hub page per brand. This is where the long-tail search traffic lands:
-    "عروض samsung نون" is a query, "عروض نون" is a fight with noon itself."""
+def _hub_rank(now: datetime):
+    """Live deals before dead ones, deepest discount first within each."""
+    return lambda d: (not _is_stale(d, now), d.get("discount_pct") or 0)
+
+
+def _hub_html(kind: str, slug: str, group: dict, now: datetime, limit: int) -> str:
+    """A hub page per brand or per category.
+
+    This is where the long-tail traffic lands: "عروض samsung نون" and
+    "عروض عطور نون" are queries someone types. "عروض نون" is a fight with noon.
+    """
     name = group["name"]
-    canonical = f"{SITE_BASE_URL}/brands/{slug}.html"
-    deals = sorted(group["deals"], key=lambda d: d.get("discount_pct") or 0, reverse=True)
+    canonical = f"{SITE_BASE_URL}/{kind}/{slug}.html"
+    deals = sorted(group["deals"], key=_hub_rank(now), reverse=True)[:limit]
     cards = "\n".join(
         _card(d, f"../{_deal_path(d)}", eager=(i < 4)) for i, d in enumerate(deals)
     )
@@ -413,7 +513,7 @@ def _brand_html(slug: str, group: dict, now: datetime) -> str:
 <main class="wrap">
   <section>
     <h1>عروض وخصومات {_esc(name)} على نون مصر</h1>
-    <p class="updated"><span>{len(deals)} عرض</span><span>أعلى خصم {_esc(best)}%</span></p>
+    <p class="updated"><span>{len(deals)} عرض</span><span>أعلى خصم {_ltr(str(best) + "%")}</span></p>
   </section>
   <section><div class="grid">{cards}</div></section>
 </main>"""
@@ -446,7 +546,114 @@ def _brand_html(slug: str, group: dict, now: datetime) -> str:
     )
 
 
-def _index_html(deals: list[dict], now: datetime) -> str:
+def _directory_html(kind: str, groups: dict[str, dict], title: str,
+                    description: str, heading: str) -> str:
+    """One page listing every hub of a kind.
+
+    Without it the brands below the front page's top 24 are reachable only from
+    sitemap.xml, and a hub nothing links to collects no authority to pass on.
+    """
+    canonical = f"{SITE_BASE_URL}/{kind}/index.html"
+    ranked = sorted(groups.items(), key=lambda kv: len(kv[1]["deals"]), reverse=True)
+    pills = "".join(
+        f'<a class="pill" href="{_esc(slug)}.html">{_esc(group["name"])} '
+        f'<span>{len(group["deals"])}</span></a>'
+        for slug, group in ranked
+    )
+    body = f"""<nav class="wrap crumbs"><a href="../index.html">الرئيسية</a> ‹ {_esc(heading)}</nav>
+<main class="wrap">
+  <section>
+    <h1>{_esc(heading)}</h1>
+    <p class="updated"><span>{len(ranked)} صفحة</span></p>
+  </section>
+  <section><nav class="pills">{pills}</nav></section>
+</main>"""
+    return _page(title=f"{title} | {SITE_NAME}", description=description,
+                 canonical=canonical, body=body, depth=1)
+
+
+def _tombstone_html(entry: dict, now: datetime, brand_slug: str = "",
+                    category_slug: str = "") -> str:
+    """The page an expired deal leaves behind.
+
+    Its whole job is to not be a 404. GitHub Pages cannot serve a redirect or a
+    410, so a URL that once ranked and then vanished from the archive would hand
+    every visitor and every crawler a dead end. This hands them the hubs instead,
+    and stays out of the index because there is nothing here worth indexing.
+    """
+    canonical = f"{SITE_BASE_URL}/{_deal_path(entry)}"
+    posted = _day(entry.get("posted_at"), now)
+    links = ['<a href="../index.html">أحدث عروض نون مصر</a>']
+    if category_slug:
+        links.append(
+            f'<a href="../cat/{_esc(category_slug)}.html">'
+            f'{_esc(category_label(entry.get("category")))}</a>'
+        )
+    if brand_slug and entry.get("brand"):
+        links.append(f'<a href="../brands/{_esc(brand_slug)}.html">'
+                     f'عروض {_esc(entry["brand"])}</a>')
+    body = f"""<nav class="wrap crumbs"><a href="../index.html">الرئيسية</a> ‹ {_esc(_title(entry))}</nav>
+<main class="wrap">
+  <section>
+    <h1>{_esc(_title(entry))}</h1>
+    <p class="notice"><strong>انتهى هذا العرض.</strong>
+    رُصد يوم <time datetime="{_esc(posted)}">{_ltr(posted)}</time> ولم نعد نتابع سعره.</p>
+    <p class="more">{" · ".join(links)}</p>
+  </section>
+</main>"""
+    return _page(
+        title=f"{_title(entry)} | {SITE_NAME}",
+        description=f"{_title(entry)} — انتهى هذا العرض على نون مصر.",
+        canonical=canonical, body=body, depth=1, robots=_ROBOTS_TOMBSTONE,
+    )
+
+
+def _pager_html(current: int, total: int, home: str, page_fmt: str) -> str:
+    """Numbered links between archive pages.
+
+    Page 1 *is* the front page, so it is linked by `home` rather than by a
+    number; `page_fmt` addresses the rest relative to whoever is rendering.
+    """
+    if total < 2:
+        return ""
+    def href(n: int) -> str:
+        return home if n == 1 else page_fmt.format(n=n)
+    parts = []
+    if current > 1:
+        parts.append(f'<a rel="prev" href="{href(current - 1)}">السابق</a>')
+    for n in range(1, total + 1):
+        # Every page links to its neighbours and to the ends; a 250-page strip of
+        # numbers would be more markup than content on a phone.
+        if n in (1, total) or abs(n - current) <= 2:
+            parts.append(f"<strong>{n}</strong>" if n == current
+                         else f'<a href="{href(n)}">{n}</a>')
+    if current < total:
+        parts.append(f'<a rel="next" href="{href(current + 1)}">التالي</a>')
+    return f'<nav class="pager">{"".join(parts)}</nav>'
+
+
+def _archive_page_html(page: int, total: int, deals: list[tuple[dict, str]],
+                       now: datetime) -> str:
+    canonical = f"{SITE_BASE_URL}/archive/{page}.html"
+    cards = "\n".join(_card(d, f"../{p}", eager=(i < 4))
+                      for i, (d, p) in enumerate(deals))
+    body = f"""<nav class="wrap crumbs"><a href="../index.html">الرئيسية</a> ‹ صفحة {page}</nav>
+<main class="wrap">
+  <section>
+    <h1>عروض نون مصر — صفحة {page} من {total}</h1>
+  </section>
+  <section><div class="grid">{cards}</div></section>
+</main>
+<div class="wrap">{_pager_html(page, total, "../index.html", "{n}.html")}</div>"""
+    return _page(
+        title=f"عروض وخصومات نون مصر — صفحة {page} | {SITE_NAME}",
+        description=f"الصفحة {page} من أرشيف عروض نون مصر، {len(deals)} عرض.",
+        canonical=canonical, body=body, depth=1,
+        og_image=next((d.get("image_url") for d, _ in deals if d.get("image_url")), ""),
+    )
+
+
+def _index_html(deals: list[dict], now: datetime, total_pages: int = 1) -> str:
     linkable = [(d, _deal_path(d)) for d in deals]
     linkable = [(d, p) for d, p in linkable if p]
 
@@ -475,7 +682,7 @@ def _index_html(deals: list[dict], now: datetime) -> str:
         # Two spans, not one line with a separator: a middle dot between an Arabic
         # phrase and a timestamp reorders unpredictably under bidi.
         f'<p class="updated"><span>{len(linkable)} عرض</span>'
-        f'<span>آخر تحديث: {_esc(now.strftime("%Y-%m-%d %H:%M"))} بتوقيت جرينتش</span></p>'
+        f'<span>آخر تحديث: {_ltr(now.strftime("%Y-%m-%d %H:%M"))} بتوقيت جرينتش</span></p>'
         '</section>'
     )
     if spotlight:
@@ -486,15 +693,25 @@ def _index_html(deals: list[dict], now: datetime) -> str:
             f'<section><h2>أكبر خصومات هذا الأسبوع</h2>'
             f'<div class="grid spotlight">{cards}</div></section>'
         )
+    cats = _category_index(deals)
+    if cats:
+        parts.append(
+            '<section><h2>تصفح حسب القسم</h2>'
+            f'{_hub_links_html("cat", cats, INDEX_BRANDS, "كل الأقسام")}</section>'
+        )
     brands = _brand_index(deals)
     if brands:
         parts.append(
-            f'<section><h2>تصفح حسب الماركة</h2>{_brand_links_html(brands)}</section>'
+            '<section><h2>تصفح حسب الماركة</h2>'
+            f'{_hub_links_html("brands", brands, INDEX_BRANDS, "كل الماركات")}</section>'
         )
     if rest:
         cards = "\n".join(_card(d, p, eager=False) for d, p in rest)
         parts.append(f'<section><h2>أحدث العروض</h2><div class="grid">{cards}</div></section>')
     parts.append("</main>")
+    if total_pages > 1:
+        pager = _pager_html(1, total_pages, "index.html", "archive/{n}.html")
+        parts.append(f'<div class="wrap">{pager}</div>')
 
     item_list = {
         "@context": "https://schema.org",
@@ -547,7 +764,7 @@ def _product_ld(deal: dict, canonical: str, now: datetime) -> dict:
             "priceCurrency": "EGP",
             "price": f"{float(deal.get('sale_price') or 0):.2f}",
             "availability": "https://schema.org/InStock",
-            "priceValidUntil": (now + timedelta(days=PRICE_VALID_DAYS)).date().isoformat(),
+            "priceValidUntil": _price_valid_until(deal, now),
         },
     }
     if deal.get("image_url"):
@@ -567,9 +784,31 @@ def _product_ld(deal: dict, canonical: str, now: datetime) -> dict:
     return ld
 
 
+def _share_html(deal: dict, canonical: str) -> str:
+    """Share the page, not the product link.
+
+    A WhatsApp group that receives a noon URL produces one order. The same group
+    given this page produces the order *and* a handful of readers who come back
+    for the next deal. WhatsApp leads because that is where Egypt forwards things.
+    """
+    text = quote(f"{_title(deal)} بخصم {deal.get('discount_pct', 0)}% على نون مصر", safe="")
+    url = quote(canonical, safe="")
+    targets = (
+        ("واتساب", f"https://wa.me/?text={text}%20{url}"),
+        ("تيليجرام", f"https://t.me/share/url?url={url}&text={text}"),
+        ("فيسبوك", f"https://www.facebook.com/sharer/sharer.php?u={url}"),
+    )
+    links = "".join(
+        f'<a href="{_esc(href)}" rel="noopener nofollow" target="_blank">{name}</a>'
+        for name, href in targets
+    )
+    return f'<div class="share"><span>شارك العرض:</span>{links}</div>'
+
+
 def _deal_html(deal: dict, related: list[tuple[dict, str]], now: datetime,
-               coupon: str = "", brand_slug: str = "") -> str:
+               coupon: str = "", brand_slug: str = "", category_slug: str = "") -> str:
     canonical = f"{SITE_BASE_URL}/{_deal_path(deal)}"
+    stale = _is_stale(deal, now)
     saved = (deal.get("original_price") or 0) - (deal.get("sale_price") or 0)
     image = deal.get("image_url")
     shot = (
@@ -611,31 +850,63 @@ def _deal_html(deal: dict, related: list[tuple[dict, str]], now: datetime,
         )
 
     posted = _day(deal.get("posted_at"), now)
-    brand_link = ""
-    crumb_brand = ""
+    crumbs_html = ['<a href="../index.html">الرئيسية</a> ‹ ']
+    more_links = []
+    if category_slug:
+        href = f"../cat/{_esc(category_slug)}.html"
+        label = _esc(category_label(deal.get("category")))
+        crumbs_html.append(f'<a href="{href}">{label}</a> ‹ ')
+        more_links.append(f'<a href="{href}">كل عروض {label}</a>')
     if brand_slug and deal.get("brand"):
         href = f"../brands/{_esc(brand_slug)}.html"
-        brand_link = f'<p class="more"><a href="{href}">كل عروض {_esc(deal["brand"])}</a></p>'
-        crumb_brand = f'<a href="{href}">{_esc(deal["brand"])}</a> ‹ '
+        crumbs_html.append(f'<a href="{href}">{_esc(deal["brand"])}</a> ‹ ')
+        more_links.append(f'<a href="{href}">كل عروض {_esc(deal["brand"])}</a>')
+    more_html = (
+        '<p class="more">' + " · ".join(more_links) + "</p>" if more_links else ""
+    )
 
-    body = f"""<nav class="wrap crumbs"><a href="../index.html">الرئيسية</a> ‹ {crumb_brand}{_esc(_title(deal))}</nav>
+    # A stale page keeps earning — the affiliate link still works and "سعر س" is
+    # still what brought the reader — but it stops presenting a month-old number
+    # as today's price.
+    if stale:
+        notice = (
+            '<p class="notice"><strong>انتهى هذا العرض غالبًا.</strong> '
+            f'السعر بالأسفل هو السعر وقت رصد العرض يوم {_ltr(posted)}. '
+            'اضغط الزر لمعرفة السعر الحالي على نون.</p>'
+        )
+        buy_label = "شوف السعر الحالي على نون"
+        caveat = (
+            f'<p class="caveat">رُصد هذا العرض يوم <time datetime="{_esc(posted)}">'
+            f'{_ltr(posted)}</time> ولم يعد محدَّثًا.</p>'
+        )
+    else:
+        notice = ""
+        buy_label = "اشتري الآن من نون"
+        caveat = (
+            f'<p class="caveat">رُصد هذا العرض يوم <time datetime="{_esc(posted)}">'
+            f'{_ltr(posted)}</time>. نون تغيّر أسعارها باستمرار، فتأكد من السعر في '
+            'صفحة المنتج قبل إتمام الشراء.</p>'
+        )
+
+    body = f"""<nav class="wrap crumbs">{"".join(crumbs_html)}{_esc(_title(deal))}</nav>
 <main class="wrap detail">
   {shot}
   <div>
     <h1>{_esc(_title(deal))}</h1>
+    {notice}
     <div class="pricebox">
       <span class="now">{_money(deal.get('sale_price'))} ج.م</span>
       <span class="was">{_money(deal.get('original_price'))} ج.م</span>
       <span class="save">وفّر {_money(saved)} ج.م</span>
-      <span class="save">خصم {_esc(deal.get('discount_pct', 0))}%</span>
+      <span class="save">خصم {_ltr(str(deal.get('discount_pct', 0)) + "%")}</span>
     </div>
     {facts_html}
     {coupon_html}
     <div class="buy"><a class="cta" href="{_esc(deal.get('url', ''))}"
-      rel="nofollow sponsored noopener" target="_blank">اشتري الآن من نون</a></div>
-    <p class="caveat">رُصد هذا العرض يوم <time datetime="{_esc(posted)}">{_esc(posted)}</time>.
-    نون تغيّر أسعارها باستمرار، فتأكد من السعر في صفحة المنتج قبل إتمام الشراء.</p>
-    {brand_link}
+      rel="nofollow sponsored noopener" target="_blank">{buy_label}</a></div>
+    {caveat}
+    {more_html}
+    {_share_html(deal, canonical)}
   </div>
 </main>
 {related_html}"""
@@ -643,8 +914,13 @@ def _deal_html(deal: dict, related: list[tuple[dict, str]], now: datetime,
     ld = _ld_json(_product_ld(deal, canonical, now))
     trail = [{"@type": "ListItem", "position": 1, "name": "الرئيسية",
               "item": f"{SITE_BASE_URL}/"}]
+    if category_slug:
+        trail.append({"@type": "ListItem", "position": len(trail) + 1,
+                      "name": category_label(deal.get("category")),
+                      "item": f"{SITE_BASE_URL}/cat/{category_slug}.html"})
     if brand_slug and deal.get("brand"):
-        trail.append({"@type": "ListItem", "position": 2, "name": deal["brand"],
+        trail.append({"@type": "ListItem", "position": len(trail) + 1,
+                      "name": deal["brand"],
                       "item": f"{SITE_BASE_URL}/brands/{brand_slug}.html"})
     trail.append({"@type": "ListItem", "position": len(trail) + 1,
                   "name": _title(deal), "item": canonical})
@@ -721,6 +997,37 @@ def _write(out_dir: str, path: str, content: str) -> None:
         f.write(content)
 
 
+def _related_picker(linkable: list[tuple[dict, str]], now: datetime):
+    """Pick fresh deals to show alongside another one.
+
+    Deliberately not "the next few entries in the archive": a two-month-old page
+    surrounded by two-month-old deals is a dead end, and dead ends are where the
+    search traffic this whole site exists to collect stops being worth anything.
+    Same category first, then anything current.
+    """
+    fresh = [(d, p) for d, p in linkable if not _is_stale(d, now)]
+    fresh.sort(key=lambda dp: dp[0].get("discount_pct") or 0, reverse=True)
+    by_category: dict[str, list[tuple[dict, str]]] = {}
+    for pair in fresh:
+        by_category.setdefault(_brand_slug(pair[0].get("category")), []).append(pair)
+
+    def pick(deal: dict) -> list[tuple[dict, str]]:
+        sku = deal.get("sku")
+        chosen: list[tuple[dict, str]] = []
+        seen: set = {sku}
+        for pool in (by_category.get(_brand_slug(deal.get("category")), []), fresh):
+            for candidate, path in pool:
+                if len(chosen) >= RELATED_DEALS:
+                    return chosen
+                if candidate.get("sku") in seen:
+                    continue
+                seen.add(candidate.get("sku"))
+                chosen.append((candidate, path))
+        return chosen
+
+    return pick
+
+
 def build_site(archive: dict, out_dir: str = OUT_DIR, now: datetime | None = None,
                coupon: str = "") -> list[str]:
     """Render the archive into `out_dir`. Returns the site-relative paths written."""
@@ -729,31 +1036,85 @@ def build_site(archive: dict, out_dir: str = OUT_DIR, now: datetime | None = Non
     linkable = [(d, _deal_path(d)) for d in deals]
     linkable = [(d, p) for d, p in linkable if p]
 
+    pages = [linkable[i:i + DEALS_PER_PAGE] for i in range(0, len(linkable), DEALS_PER_PAGE)]
+    total_pages = min(len(pages), MAX_ARCHIVE_PAGES) or 1
+
     written = ["index.html", "robots.txt", "sitemap.xml", "feed.xml", ".nojekyll"]
-    _write(out_dir, "index.html", _index_html(deals, now))
+    _write(out_dir, "index.html", _index_html(deals, now, total_pages))
     _write(out_dir, "robots.txt", _robots_txt())
     _write(out_dir, "feed.xml", _feed_xml(linkable, now))
     # Pages is a static host with no server config, so this is the only way to
     # stop Jekyll from swallowing the generated files.
     _write(out_dir, ".nojekyll", "")
+    if SITE_DOMAIN:
+        _write(out_dir, "CNAME", f"{SITE_DOMAIN}\n")
+        written.append("CNAME")
 
+    hubs: list[tuple[str, str]] = []
     brands = _brand_index(deals)
-    for slug, group in brands.items():
-        path = f"brands/{slug}.html"
-        _write(out_dir, path, _brand_html(slug, group, now))
-        written.append(path)
+    cats = _category_index(deals)
+    for kind, groups, limit in (
+        ("brands", brands, BRAND_PAGE_DEALS),
+        ("cat", cats, CATEGORY_PAGE_DEALS),
+    ):
+        for slug, group in groups.items():
+            path = f"{kind}/{slug}.html"
+            _write(out_dir, path, _hub_html(kind, slug, group, now, limit))
+            written.append(path)
+            hubs.append((path, now.date().isoformat()))
 
-    for i, (deal, path) in enumerate(linkable):
-        related = [dp for dp in linkable[i + 1: i + 1 + RELATED_DEALS]]
-        slug = _brand_slug(deal.get("brand"))
+    if brands:
+        _write(out_dir, "brands/index.html", _directory_html(
+            "brands", brands, "كل ماركات عروض نون مصر",
+            "كل الماركات التي رصدنا لها عروضًا على نون مصر.", "كل الماركات"))
+        written.append("brands/index.html")
+        hubs.append(("brands/index.html", now.date().isoformat()))
+    if cats:
+        _write(out_dir, "cat/index.html", _directory_html(
+            "cat", cats, "كل أقسام عروض نون مصر",
+            "كل أقسام المنتجات التي رصدنا لها عروضًا على نون مصر.", "كل الأقسام"))
+        written.append("cat/index.html")
+        hubs.append(("cat/index.html", now.date().isoformat()))
+
+    # Page 1 is the front page, so only 2..N are written out.
+    for number in range(2, total_pages + 1):
+        path = f"archive/{number}.html"
+        _write(out_dir, path, _archive_page_html(number, total_pages, pages[number - 1], now))
+        written.append(path)
+        hubs.append((path, now.date().isoformat()))
+
+    pick_related = _related_picker(linkable, now)
+    for deal, path in linkable:
+        brand = _brand_slug(deal.get("brand"))
+        category = _brand_slug(deal.get("category"))
         _write(out_dir, path, _deal_html(
-            deal, related, now, coupon=coupon,
-            brand_slug=slug if slug in brands else "",
+            deal, pick_related(deal), now, coupon=coupon,
+            brand_slug=brand if brand in brands else "",
+            category_slug=category if category in cats else "",
         ))
         written.append(path)
 
+    # Tombstones last, and never over a live page: a SKU that came back is a
+    # real deal again, and `prune_archive` already keeps the two sets disjoint.
+    live_paths = {p for _, p in linkable}
+    for entry in archive.get("retired", []):
+        path = _deal_path(entry)
+        if not path or path in live_paths:
+            continue
+        brand = _brand_slug(entry.get("brand"))
+        category = _brand_slug(entry.get("category"))
+        _write(out_dir, path, _tombstone_html(
+            entry, now,
+            brand_slug=brand if brand in brands else "",
+            category_slug=category if category in cats else "",
+        ))
+        written.append(path)
+
+    # Tombstones are deliberately absent: they are noindex, and asking a crawler
+    # to spend its budget on pages we told it to ignore is how the real pages
+    # get crawled less often.
     sitemap = [("", now.date().isoformat())]
-    sitemap += [(f"brands/{slug}.html", now.date().isoformat()) for slug in brands]
+    sitemap += hubs
     sitemap += [(p, _day(d.get("posted_at"), now)) for d, p in linkable]
     _write(out_dir, "sitemap.xml", _sitemap_xml(sitemap))
     return written
@@ -762,6 +1123,6 @@ def build_site(archive: dict, out_dir: str = OUT_DIR, now: datetime | None = Non
 if __name__ == "__main__":
     built = build_site(
         prune_archive(load_archive(ARCHIVE_FILE)),
-        coupon=os.environ.get("NOON_COUPON_CODE", "gado1996").strip(),
+        coupon=os.environ.get("NOON_COUPON_CODE", "gado").strip(),
     )
     print(f"Built {len(built)} files into {OUT_DIR}/ for {SITE_BASE_URL}")

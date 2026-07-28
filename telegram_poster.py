@@ -27,7 +27,11 @@ def with_affiliate_utms(url: str) -> str:
     """
     if not url or "utm_medium=" in url:
         return url
-    medium = os.environ.get("NOON_AFFILIATE_MEDIUM", "AFFc944753cc349")
+    # Read out of a link the panel generated on 2026-07-28, by resolving the
+    # short link it hands you and reading the query it lands on. The previous
+    # value here (AFFc944753cc349) was not this account's ID, so every click the
+    # bot ever sent was unattributed. Re-check the same way if commissions stop.
+    medium = os.environ.get("NOON_AFFILIATE_MEDIUM", "AFFccacc092d97d")
     if not medium:
         return url
     campaign = os.environ.get("NOON_AFFILIATE_CAMPAIGN", "CMP2ce0b63a6a1anoon")

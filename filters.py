@@ -1,6 +1,9 @@
 import json
+import math
 import os
 from datetime import datetime, timedelta, timezone
+
+from categories import commission_rate
 
 MIN_DISCOUNT = 25
 # Affiliate commission is a percentage of basket value, so a 60%-off EGP 40 item
@@ -15,6 +18,16 @@ REPOST_AFTER_DAYS = 21
 # Per-run cap on any one seller. Without it a single store ("ELLE Cosmetics" had
 # 18 of 72 qualifying deals in one sample) turns the channel into its catalogue.
 MAX_PER_SELLER = 2
+# The affiliate panel caps commission at AED 50 per item. In EGP that is roughly
+# 700 at mid-2026 rates; override it when the peg moves rather than editing code.
+#
+# The cap is the single most important number here. It means a 40,000 EGP TV at
+# 3% earns exactly what a 22,000 EGP one does, and less than a 9,000 EGP
+# fragrance set at 8% — so "expensive" is not the same as "worth posting".
+COMMISSION_CAP_EGP = float(os.environ.get("COMMISSION_CAP_EGP", "700"))
+# Below this, a listing with no brand and no reviews is marketplace filler: no
+# search demand, cents of commission, and a deal page that is thin by construction.
+FILLER_PRICE = 400
 
 
 # ── Qualification ─────────────────────────────────────────────────────────────
@@ -28,49 +41,93 @@ def _rating_disqualifies(product: dict) -> bool:
     return rating < MIN_RATING
 
 
+def _is_filler(product: dict) -> bool:
+    """Cheap, unbranded, never reviewed by anyone. Not a deal, a listing."""
+    return (
+        not (product.get("brand") or "").strip()
+        and not (product.get("rating_count") or 0)
+        and (product.get("sale_price") or 0) < FILLER_PRICE
+    )
+
+
 def _qualifies(product: dict, min_discount: int, min_price: float) -> bool:
     if product.get("discount_pct", 0) < min_discount:
         return False
     if product.get("sale_price", 0) < min_price:
         return False
+    if _is_filler(product):
+        return False
     return not _rating_disqualifies(product)
 
 
 # ── Ranking ───────────────────────────────────────────────────────────────────
+#
+# Deals are ranked by expected commission in pounds, not by a points total.
+# `expected_commission` is what the sale pays if it happens; the multipliers
+# below are the odds that it happens at all. Multiplying them is the estimate
+# of what the post is actually worth.
 
-def _rating_bonus(product: dict) -> float:
+def expected_commission(product: dict) -> float:
+    """What one sale of this product pays, in EGP.
+
+    Rate comes from the product's category and the panel caps the payout per
+    item, so this is `min(cap, rate × price)` and nothing more clever.
+    """
+    price = product.get("sale_price") or 0
+    if price <= 0:
+        return 0.0
+    return min(COMMISSION_CAP_EGP, commission_rate(product.get("category")) * price)
+
+
+def _discount_multiplier(product: dict) -> float:
+    """A deeper discount converts better, with diminishing returns — nobody buys
+    twice as often because a thing is 80% off rather than 40%."""
+    return 1.0 + min(0.6, (product.get("discount_pct") or 0) / 100.0)
+
+
+def _rating_multiplier(product: dict) -> float:
+    """Only judge a rating enough people contributed to."""
     rating = product.get("rating")
     if rating is None or (product.get("rating_count") or 0) < RATING_CONFIDENCE:
-        return 0.0
-    return max(-10.0, min(6.0, (rating - 4.0) * 10))
+        return 1.0
+    return max(0.6, min(1.3, 1.0 + (rating - 4.0) * 0.3))
 
 
-def _value_bonus(product: dict) -> float:
-    """Commission scales with basket value, so a pricier item is worth more."""
-    return min(10.0, product.get("sale_price", 0) / 100)
+def _demand_multiplier(product: dict) -> float:
+    """Review count is the only demand signal in the payload, and demand is what
+    search volume is made of: a product 2,000 people rated is one people look
+    for by name, and its deal page can rank. One nobody rated cannot."""
+    count = product.get("rating_count") or 0
+    if count <= 0:
+        return 0.85
+    return min(1.5, 0.9 + 0.2 * math.log10(count))
 
 
-def _trust_bonus(product: dict) -> float:
-    bonus = 0.0
+def _trust_multiplier(product: dict) -> float:
+    """Fulfilment and bestseller flags drive conversion, and an order that never
+    completes pays nothing. A refund voids the commission outright."""
+    multiplier = 1.0
     if product.get("fulfilled_by_noon"):
-        bonus += 4.0
+        multiplier *= 1.15
     if product.get("free_delivery"):
-        bonus += 2.0
+        multiplier *= 1.05
     if product.get("is_bestseller"):
-        bonus += 3.0
-    return bonus
+        multiplier *= 1.2
+    return multiplier
 
 
 def deal_score(product: dict) -> float:
-    """Rank deals by expected earnings, not by headline discount alone.
+    """Expected earnings from posting this deal, in EGP.
 
-    A 40%-off EGP 1,500 bestseller rated 4.6 beats a 68%-off EGP 190 no-name.
+    Replaces a points total that summed discount and price. That total ranked a
+    45,000 EGP television above a 6,000 EGP fragrance set, when the television
+    pays 3% capped at EGP 700 and the fragrance set pays 8% of every pound.
     """
-    return (
-        product.get("discount_pct", 0)
-        + _rating_bonus(product)
-        + _value_bonus(product)
-        + _trust_bonus(product)
+    return expected_commission(product) * (
+        _discount_multiplier(product)
+        * _rating_multiplier(product)
+        * _demand_multiplier(product)
+        * _trust_multiplier(product)
     )
 
 

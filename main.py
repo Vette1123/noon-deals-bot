@@ -2,7 +2,7 @@ import os
 import sys
 import json
 import time
-from scraper import fetch_products, MAX_PAGES, PAGES_PER_RUN
+from scraper import FETCHES_PER_RUN, fetch_products, next_task
 from archive import (
     ARCHIVE_FILE,
     load_archive,
@@ -28,8 +28,16 @@ STATE_FILE  = "state.json"
 # Six runs a day. 12 keeps the channel at ~70 posts/day without the burst of 50
 # near-identical cards that made readers mute it.
 MAX_POSTS_PER_RUN = int(os.environ.get("MAX_POSTS_PER_RUN", "12"))
+# The channel and the site want opposite things: a reader mutes a channel that
+# posts 40 times a run, while the site earns more the more pages it has. So the
+# top 12 go to Telegram and the top 20 are archived — the extra 8 become pages
+# without ever reaching anyone's notifications.
+SITE_DEALS_PER_RUN = int(os.environ.get("SITE_DEALS_PER_RUN", "20"))
 DELAY_BETWEEN_POSTS = 3
-DEFAULT_COUPON_CODE = "gado1996"
+# The panel lists exactly two live coupons for this campaign, `gado` and `HZICP`
+# (10% cashback, capped). `gado1996` was not one of them — a reader who typed it
+# at checkout got an error, which costs the coupon attribution channel and trust.
+DEFAULT_COUPON_CODE = "gado"
 
 
 def _load_state() -> dict:
@@ -37,20 +45,12 @@ def _load_state() -> dict:
         with open(STATE_FILE) as f:
             return json.load(f)
     except Exception:
-        return {"next_page": 1}
+        return {}
 
 
 def _save_state(state: dict) -> None:
     with open(STATE_FILE, "w") as f:
         json.dump(state, f, indent=2)
-
-
-def _next_page(start_page: int) -> int:
-    """Advance the pagination cursor, wrapping at the end of the catalogue."""
-    following = start_page + PAGES_PER_RUN
-    if following > MAX_PAGES:
-        return 1
-    return following
 
 
 def run(dry_run: bool = False) -> None:
@@ -62,17 +62,17 @@ def run(dry_run: bool = False) -> None:
         raise ValueError("TELEGRAM_BOT_TOKEN is required")
 
     state = _load_state()
-    start_page = state.get("next_page", 1)
-    print(f"Fetching Noon Egypt deals (pages {start_page}–{start_page + PAGES_PER_RUN - 1})...")
-    products = fetch_products(start_page=start_page)
+    start_task = state.get("next_task", 0)
+    print(f"Fetching Noon Egypt deals ({FETCHES_PER_RUN} category feeds from #{start_task})...")
+    products = fetch_products(start_task=start_task)
     print(f"Found {len(products)} products")
 
     if not products:
         # Hard failure, not a quiet no-op: a 0-product scrape means noon changed
         # the page again (that's how the 2026-06-30 breakage stayed invisible for
         # a month behind green CI runs). Reset the cursor, then fail the job.
-        print("No products found — resetting page cursor to 1 for next run.")
-        _save_state({"next_page": 1})
+        print("No products found — resetting the feed cursor for next run.")
+        _save_state({"next_task": 0})
         raise SystemExit("Scraped 0 products — noon page format likely changed. Failing loudly.")
 
     already_posted = prune_posted(load_posted(POSTED_FILE))
@@ -84,6 +84,10 @@ def run(dry_run: bool = False) -> None:
     )
 
     to_post = new_deals[:MAX_POSTS_PER_RUN]
+    # Archived first so the posted ones land on top of the archive afterwards,
+    # and so a crash in the posting loop still leaves the site something to build.
+    for product in reversed(new_deals[len(to_post):SITE_DEALS_PER_RUN]):
+        record_deal(archive, product)
     posted = 0
     try:
         for product in to_post:
@@ -116,9 +120,12 @@ def run(dry_run: bool = False) -> None:
         # deal in this run gets posted a second time on the next one.
         save_posted(already_posted, POSTED_FILE)
         save_archive(archive, ARCHIVE_FILE)
-        _save_state({"next_page": _next_page(start_page)})
+        _save_state({"next_task": next_task(start_task)})
 
-    print(f"Done. Posted {posted} deals. Next run starts at page {_next_page(start_page)}.")
+    print(
+        f"Done. Posted {posted} deals, archived {len(archive.get('deals', []))} total. "
+        f"Next run starts at feed #{next_task(start_task)}."
+    )
 
 
 if __name__ == "__main__":

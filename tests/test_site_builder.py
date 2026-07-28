@@ -1,6 +1,7 @@
 import json
 import re
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 
 import site_builder
 from site_builder import build_site
@@ -15,7 +16,7 @@ def _deal(sku="N1A", **overrides):
         "brand": "Lenovo",
         "store_name": "Tech Store",
         "image_url": "https://f.nooncdn.com/p/pnsku/x.jpg",
-        "url": "https://www.noon.com/egypt-en/laptop/N1A/p/?utm_medium=AFFc944753cc349",
+        "url": "https://www.noon.com/egypt-en/laptop/N1A/p/?utm_medium=AFFccacc092d97d",
         "sale_price": 12500.0,
         "original_price": 18000.0,
         "discount_pct": 31,
@@ -49,7 +50,7 @@ def test_builds_index_deal_page_and_crawl_files(tmp_path):
 def test_deal_page_links_out_with_the_affiliate_url(tmp_path):
     out, _ = _build([_deal()], tmp_path)
     page = _read(out, "deals/N1A.html")
-    assert "utm_medium=AFFc944753cc349" in page
+    assert "utm_medium=AFFccacc092d97d" in page
     # Paid links must be declared, or the site is a search-spam target.
     assert 'rel="nofollow sponsored noopener"' in page
 
@@ -150,7 +151,7 @@ def test_unsafe_skus_are_skipped_rather_than_written_outside_the_output(tmp_path
 
 
 def test_sitemap_lists_the_home_page_and_every_deal(tmp_path):
-    out, _ = _build([_deal("A1"), _deal("B2")], tmp_path)
+    out, _ = _build([_deal("A1", brand=""), _deal("B2", brand="")], tmp_path)
     sitemap = _read(out, "sitemap.xml")
     assert f"<loc>{site_builder.SITE_BASE_URL}/</loc>" in sitemap
     assert f"<loc>{site_builder.SITE_BASE_URL}/deals/A1.html</loc>" in sitemap
@@ -202,7 +203,8 @@ def test_brands_with_enough_deals_get_their_own_hub_page(tmp_path):
 
 
 def test_thin_brands_get_no_page(tmp_path):
-    out, written = _build(_brand_deals("Rarebrand", 2), tmp_path)
+    # One deal is not a hub, it is the deal page again competing with itself.
+    out, written = _build(_brand_deals("Rarebrand", 1), tmp_path)
     assert not any(p.startswith("brands/") for p in written)
     assert "brands/" not in _read(out, "index.html")
 
@@ -285,3 +287,158 @@ def test_no_em_dashes_reach_the_reader(tmp_path):
     for path in written:
         if path.endswith((".html", ".xml", ".txt")):
             assert "—" not in _read(out, path), path
+
+
+# ── Deals that age out ────────────────────────────────────────────────────────
+
+def _old(sku, days, **kw):
+    return _deal(sku, posted_at=(NOW - timedelta(days=days)).isoformat(), **kw)
+
+
+def test_a_stale_deal_stops_presenting_its_price_as_current(tmp_path):
+    out, _ = _build([_old("N1A", site_builder.STALE_AFTER_DAYS + 1)], tmp_path)
+    page = _read(out, "deals/N1A.html")
+    assert "انتهى هذا العرض غالبًا" in page
+    assert "شوف السعر الحالي على نون" in page
+    # It still links out, and the link still carries the UTMs: a reader who
+    # arrived from "سعر لابتوب لينوفو" is still worth sending to noon.
+    assert "utm_medium=AFFccacc092d97d" in page
+
+
+def test_a_fresh_deal_carries_no_expiry_notice(tmp_path):
+    out, _ = _build([_deal()], tmp_path)
+    page = _read(out, "deals/N1A.html")
+    assert "انتهى هذا العرض" not in page
+    assert "اشتري الآن من نون" in page
+
+
+def test_price_validity_is_measured_from_when_the_deal_was_seen(tmp_path):
+    # Not from the build. Otherwise every rebuild re-certifies a months-old price
+    # as current, in a machine-readable format Google takes at face value.
+    out, _ = _build([_old("N1A", 90)], tmp_path)
+    blob = re.search(
+        r'<script type="application/ld\+json">(.*?)</script>',
+        _read(out, "deals/N1A.html"), re.S,
+    ).group(1)
+    valid_until = json.loads(blob)["offers"]["priceValidUntil"]
+    assert valid_until < NOW.date().isoformat()
+
+
+def test_retired_deals_keep_their_url_but_leave_the_index(tmp_path):
+    archive = {"deals": [_deal("LIVE")],
+               "retired": [{"sku": "GONE", "name": "منتج قديم", "brand": "Lenovo",
+                            "posted_at": (NOW - timedelta(days=400)).isoformat()}]}
+    out = tmp_path / "public"
+    written = build_site(archive, str(out), now=NOW)
+    assert "deals/GONE.html" in written
+    page = (out / "deals/GONE.html").read_text(encoding="utf-8")
+    assert "انتهى هذا العرض" in page
+    assert '<meta name="robots" content="noindex,follow">' in page
+    # Crawl budget spent on pages we told the crawler to ignore is crawl budget
+    # not spent on the real ones.
+    assert "deals/GONE.html" not in _read(out, "sitemap.xml")
+
+
+def test_a_live_deal_is_never_overwritten_by_its_own_tombstone(tmp_path):
+    archive = {"deals": [_deal("N1A")],
+               "retired": [{"sku": "N1A", "name": "قديم",
+                            "posted_at": (NOW - timedelta(days=400)).isoformat()}]}
+    out = tmp_path / "public"
+    build_site(archive, str(out), now=NOW)
+    page = (out / "deals/N1A.html").read_text(encoding="utf-8")
+    assert "اشتري الآن من نون" in page
+    assert "noindex" not in page
+
+
+# ── Category hubs ─────────────────────────────────────────────────────────────
+
+def _cat_deals(code, n):
+    return [_deal(f"C{i}", category=code, brand=f"Brand{i}", discount_pct=30 + i)
+            for i in range(n)]
+
+
+def test_categories_get_an_arabic_hub_page(tmp_path):
+    out, written = _build(_cat_deals("beauty/fragrance", 4), tmp_path)
+    assert "cat/beauty-fragrance.html" in written
+    page = _read(out, "cat/beauty-fragrance.html")
+    assert "عروض وخصومات عطور على نون مصر" in page
+    assert page.count('class="card"') == 4
+
+
+def test_categories_we_have_no_arabic_name_for_get_no_page(tmp_path):
+    # A hub titled with a noon URL slug reads as machine output to a reader.
+    out, written = _build(_cat_deals("some/unknown-code", 4), tmp_path)
+    assert not any(p.startswith("cat/") for p in written)
+
+
+def test_deal_pages_link_up_to_their_category(tmp_path):
+    out, _ = _build(_cat_deals("beauty/fragrance", 3), tmp_path)
+    page = _read(out, "deals/C0.html")
+    assert "../cat/beauty-fragrance.html" in page
+    trail = next(
+        json.loads(b) for b in re.findall(
+            r'<script type="application/ld\+json">(.*?)</script>', page, re.S)
+        if json.loads(b)["@type"] == "BreadcrumbList"
+    )
+    assert [i["name"] for i in trail["itemListElement"]][1] == "عطور"
+
+
+def test_every_hub_is_reachable_from_a_directory_page(tmp_path):
+    deals = [d for i in range(30)
+             for d in _brand_deals(f"Brand{i}", 2, start=i * 10)]
+    out, written = _build(deals, tmp_path)
+    assert "brands/index.html" in written
+    directory = _read(out, "brands/index.html")
+    # All 30, not just the 24 the front page has room for.
+    assert directory.count('class="pill"') == 30
+    assert "brands/index.html" in _read(out, "index.html")
+
+
+# ── Pagination ────────────────────────────────────────────────────────────────
+
+def test_deals_below_the_front_page_stay_reachable_by_crawling(tmp_path):
+    deals = [_deal(f"P{i}", brand="") for i in range(site_builder.DEALS_PER_PAGE * 2 + 5)]
+    out, written = _build(deals, tmp_path)
+    assert "archive/2.html" in written
+    assert "archive/3.html" in written
+    assert 'href="archive/2.html"' in _read(out, "index.html")
+    page2 = _read(out, "archive/2.html")
+    assert 'rel="next"' in page2 and 'href="../index.html"' in page2
+    assert f"{site_builder.SITE_BASE_URL}/archive/2.html" in _read(out, "sitemap.xml")
+
+
+def test_a_single_page_of_deals_gets_no_pager(tmp_path):
+    out, written = _build([_deal()], tmp_path)
+    assert not any(p.startswith("archive/") for p in written)
+    assert 'class="pager"' not in _read(out, "index.html")
+
+
+# ── Related deals ─────────────────────────────────────────────────────────────
+
+def test_related_deals_are_current_ones(tmp_path):
+    # A dead page surrounded by dead pages is where the search traffic stops.
+    deals = [_old("OLD", 200)] + [_deal(f"F{i}", category="beauty/fragrance") for i in range(4)]
+    out, _ = _build(deals, tmp_path)
+    related = _read(out, "deals/OLD.html").split("عروض أخرى قد تعجبك", 1)[1]
+    assert "deals/F0.html" in related
+
+
+# ── Custom domain ─────────────────────────────────────────────────────────────
+
+def test_a_custom_domain_writes_a_cname_and_owns_every_url(tmp_path, monkeypatch):
+    monkeypatch.setattr(site_builder, "SITE_DOMAIN", "deals-masr.com")
+    monkeypatch.setattr(site_builder, "SITE_BASE_URL", "https://deals-masr.com")
+    out, written = _build([_deal()], tmp_path)
+    assert "CNAME" in written
+    assert _read(out, "CNAME") == "deals-masr.com\n"
+    assert "https://deals-masr.com/deals/N1A.html" in _read(out, "sitemap.xml")
+
+
+# ── Sharing ───────────────────────────────────────────────────────────────────
+
+def test_deal_pages_can_be_forwarded_to_a_whatsapp_group(tmp_path):
+    out, _ = _build([_deal()], tmp_path)
+    page = _read(out, "deals/N1A.html")
+    assert "https://wa.me/?text=" in page
+    # The page, not the product link: a group that gets this comes back.
+    assert quote(f"{site_builder.SITE_BASE_URL}/deals/N1A.html", safe="") in page

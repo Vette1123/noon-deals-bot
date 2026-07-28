@@ -31,14 +31,14 @@ Two attribution channels run in parallel — both are message-side, neither need
    `_SOURCE`; set `NOON_AFFILIATE_MEDIUM=""` to disable locally. If commissions stop landing, re-copy a
    fresh link out of the panel and compare the params — noon does rotate them.
 2. **Influencer coupon code** shown in the message body. Users copy it and paste at checkout.
-- The coupon is configurable via `NOON_COUPON_CODE` (defaults to `gado1996` — see [main.py](main.py)).
+- The coupon is configurable via `NOON_COUPON_CODE` (defaults to `gado` — see [main.py](main.py); the panel is the source of truth for which codes are live).
 - Do **not** reintroduce `noon_auth.py`, `affiliate.py`, OTP flows, or session cookies. If you think you need them, you're solving the wrong problem — the coupon-in-message approach is the intentional design.
 - URL-based coupon params (`?coupon=…`, `?sellerCode=…`, etc.) are ignored by noon.com. Do not bother appending them.
 
 ## Telegram message formatting (MarkdownV2)
 
 - Every dynamic string goes through `_escape_md2` in [telegram_poster.py](telegram_poster.py). Forgetting to escape `.` / `-` / `!` silently breaks rendering.
-- The coupon uses a MarkdownV2 code span (`` `gado1996` ``) — on mobile Telegram this becomes **tap-to-copy**. That's the UX contract, don't change it to a regular string.
+- The coupon uses a MarkdownV2 code span (`` `gado` ``) — on mobile Telegram this becomes **tap-to-copy**. That's the UX contract, don't change it to a regular string.
 - The coupon value is validated against `^[A-Za-z0-9_-]+$` before being placed inside the code span, so no escaping is needed inside. Keep that guard — it's what lets us skip escaping safely.
 - Captions are Arabic + emoji — keep that style when editing `format_message`.
 
@@ -57,8 +57,34 @@ Two attribution channels run in parallel — both are message-side, neither need
 - Product URLs are `…/{slug}/{SKU}/p/?o={offer_code}`. The `o=` param pins the seller/offer the
   advertised price belongs to — drop it and the user can land on a pricier offer for the same SKU.
 
+## Where the money comes from (read before touching filters.py)
+
+Commission rates are **per category** and the panel **caps payout at AED 50 per item**
+(~EGP 700). Both facts are in [categories.py](categories.py) and
+[docs/MONETIZATION.md](docs/MONETIZATION.md).
+
+- Apparel/bags/jewellery pay 10%, beauty/health/toys/baby/sports/small-appliances 8%,
+  home 6%, and **electronics 2–4%** — laptops 3%, mobiles 2%. Chasing expensive
+  electronics is the worst square on the board, and the old points-based `deal_score`
+  did exactly that by adding a raw price bonus.
+- `deal_score` is now **expected commission in EGP** (`min(cap, rate × price)`)
+  multiplied by conversion odds (discount, rating, demand, fulfilment). Do not
+  re-add a term that rewards price on its own — the cap is what makes that wrong.
+- Category comes from the feed a product was scraped out of, not from the payload
+  (there is no category field in it). Anything that bypasses `fetch_products` gets
+  `DEFAULT_RATE`.
+
 ## Deals URL (what still works)
 
+- **Scraping is per category, not out of `all-products`.** `/egypt-en/{category-code}/`
+  is a real PLP and takes the same filter params; the marketing slugs off the homepage
+  (`/egypt-en/beauty/`, `/egypt-en/electronics/`) are curated landing pages with **no
+  catalog payload at all**. Verified 2026-07-28 — do not "simplify" back to those.
+- `f[category]=…` as a *query param* on `all-products` returns 0 hits when combined
+  with `min_offer_price`. The browse path is what works.
+- `all-products` reports `nbPages:10` against 109k hits, and past page ~10 it re-serves
+  earlier pages. The old `MAX_PAGES=60` cursor therefore spent most of its cycle
+  re-reading the same ~500 products. `PAGES_PER_FEED = 10` is not arbitrary.
 - `f[discount_percent][min]=…` and `sort[by]=discount_percent` were **removed** in the rewrite. So was
   `sort[order]` (now `sort[dir]`). Unknown params are silently ignored — the server just falls back to
   `sort[by]=popularity`, which is exactly how the June breakage hid for a month.
@@ -66,7 +92,7 @@ Two attribution channels run in parallel — both are message-side, neither need
   `new_arrivals`, `grade`, `colour_family`, `item_condition`, `partner`. Format is `f[facet]=value`.
 - `deal_tag` codes (`big-yellow-sale`, `bys-flash-sale`, `bys-mega`) are campaign-scoped and die when
   the campaign does. `min_offer_price=365_days` ("lowest price in a year") is the durable one, and is
-  what `DEALS_URL` uses. Real discount filtering happens in [filters.py](filters.py).
+  what `DEALS_QUERY` uses. Real discount filtering happens in [filters.py](filters.py).
 - To re-check which params still bite: request the URL and look at the `search:{f:…,sort:…}` object
   echoed back in the payload. If your param isn't in there, noon dropped it.
 
@@ -86,17 +112,19 @@ without re-measuring.
   nothing and still burns a post slot.
 - **`MIN_RATING = 3.5`, only above `RATING_CONFIDENCE` reviews** — a 2.1★ product with 3 reviews is
   noise; with 400 reviews it's a refund waiting to happen, and refunds void commission.
-- **`deal_score`** ranks by expected earnings (discount + rating + basket value + trust flags), not by
-  headline discount. A 45%-off EGP 1,500 bestseller outranks a 68%-off EGP 190 no-name.
+- **`deal_score`** ranks by expected commission in EGP — see the money section above.
+- **`_is_filler`** drops listings with no brand, no reviews and a price under EGP 400.
+  They have no search demand, earn cents, and their deal pages are thin by construction.
 - **`MAX_PER_SELLER = 2`** — in one live sample a single store ("ELLE Cosmetics") owned 18 of 72
   qualifying deals, including 8 near-identical body splashes. Uncapped, the channel becomes its
   catalogue and readers mute it.
 - **`_dedupe_by_name`** — the same listing is often resold by several stores under the identical name.
 - **`MAX_POSTS_PER_RUN = 12`** (env-overridable) — was 50, i.e. 300 posts/day. Nobody stays subscribed
-  to that.
-- **`REPOST_AFTER_DAYS = 21`** with `MAX_PAGES = 60` — the old code wiped `posted.json` at the end of
-  every 10-page cycle, so the same ~500 products recycled roughly once a day. 60 pages ≈ 3,000
-  products and a 5-day cursor cycle, with a 21-day cooldown per SKU on top.
+  to that. **`SITE_DEALS_PER_RUN = 20`** is the separate, larger cap for the archive: the channel and
+  the site want opposite volumes, so everything between the two caps becomes a page without ever
+  becoming a notification. Raise that one, never the post cap.
+- **`REPOST_AFTER_DAYS = 21`** against a rotation of ~34 category feeds × 10 pages, six fetches a run:
+  roughly a ten-day cycle over ~14,000 products, with the 21-day per-SKU cooldown on top.
 
 ## Publishing surfaces (Telegram is not the only one)
 
@@ -139,12 +167,24 @@ Anything that publishes a product URL goes through it, or that traffic is unpaid
 - Outbound product links are `rel="nofollow sponsored noopener"`.
 - Deal filenames come from the SKU and are validated against `^[A-Za-z0-9_-]+$` — a SKU
   is scraped data, and `../../` in a filename writes outside the output directory.
+- **A deal page must never start 404ing.** Deals that age out become `noindex`
+  tombstones (`archive.prune_archive` → `archive["retired"]`) that link on to their
+  hubs. Deleting the entry instead throws away the one asset here that takes months
+  to rebuild. Tombstones stay out of `sitemap.xml` on purpose.
+- `priceValidUntil` is measured from `posted_at`, **not** from build time. Building
+  from `now` silently re-certifies a months-old price as current, to a consumer that
+  takes it at face value.
+- Numbers, dates and percentages inside an Arabic sentence go through `_ltr()`.
+  Without it bidi renders `2026-07-28` as `28-07-2026` and puts the `%` on the wrong
+  side of the digits. Test with a screenshot — `innerText` shows logical order and
+  will look fine while the page is wrong.
 
 ## State files
 
 - [posted.json](posted.json), [state.json](state.json) and [deals.json](deals.json) are **committed** by the workflow after each run (`chore: update state [skip ci]`). That's intentional — they're the bot's memory. Don't add them to `.gitignore`.
-- `deals.json` is the site's data source, capped at 30 days / 3,000 deals by
-  `prune_archive`. Generated HTML is **not** committed — `publish-site` rebuilds it.
+- `deals.json` is the site's data source, capped at 365 days / 12,000 live deals by
+  `prune_archive`, plus up to 50,000 tombstones under `"retired"`. Generated HTML is
+  **not** committed — `publish-site` rebuilds it.
 - `posted.json` is `{sku: ISO-8601 timestamp}`. The legacy `{sku: true}` form still loads — those
   entries are read as "posted just now" and rewritten with a real stamp by `prune_posted`, so an
   upgrade never re-floods the channel.

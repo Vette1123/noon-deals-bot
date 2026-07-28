@@ -2,8 +2,10 @@ import os, tempfile
 from datetime import datetime, timedelta, timezone
 
 from filters import (
+    COMMISSION_CAP_EGP,
     REPOST_AFTER_DAYS,
     deal_score,
+    expected_commission,
     filter_deals,
     load_posted,
     mark_posted,
@@ -15,10 +17,10 @@ from filters import (
 NOW = datetime(2026, 7, 28, 12, 0, tzinfo=timezone.utc)
 
 PRODUCTS = [
-    {"sku": "A1", "name": "Good", "discount_pct": 25, "sale_price": 100, "original_price": 133},
-    {"sku": "A2", "name": "Bad",  "discount_pct": 5,  "sale_price": 95,  "original_price": 100},
-    {"sku": "A3", "name": "Best", "discount_pct": 50, "sale_price": 50,  "original_price": 100},
-    {"sku": "A4", "name": "Old",  "discount_pct": 30, "sale_price": 70,  "original_price": 100},
+    {"sku": "A1", "name": "Good", "brand": "B", "discount_pct": 25, "sale_price": 100, "original_price": 133},
+    {"sku": "A2", "name": "Bad",  "brand": "B", "discount_pct": 5,  "sale_price": 95,  "original_price": 100},
+    {"sku": "A3", "name": "Best", "brand": "B", "discount_pct": 50, "sale_price": 50,  "original_price": 100},
+    {"sku": "A4", "name": "Old",  "brand": "B", "discount_pct": 30, "sale_price": 70,  "original_price": 100},
 ]
 
 
@@ -42,9 +44,9 @@ def test_filter_drops_cheap_items_regardless_of_discount():
 
 def test_filter_defaults_enforce_both_gates():
     products = [
-        {"sku": "OK",    "discount_pct": 25, "sale_price": 150},
-        {"sku": "CHEAP", "discount_pct": 60, "sale_price": 149},
-        {"sku": "WEAK",  "discount_pct": 24, "sale_price": 900},
+        {"sku": "OK",    "brand": "B", "discount_pct": 25, "sale_price": 150},
+        {"sku": "CHEAP", "brand": "B", "discount_pct": 60, "sale_price": 149},
+        {"sku": "WEAK",  "brand": "B", "discount_pct": 24, "sale_price": 900},
     ]
     assert [p["sku"] for p in filter_deals(products, {}, now=NOW)] == ["OK"]
 
@@ -70,10 +72,12 @@ def test_results_are_ranked_by_deal_score_not_raw_discount():
 
 def test_one_seller_cannot_take_over_a_run():
     flood = [
-        {"sku": f"S{i}", "discount_pct": 60, "sale_price": 300, "store_name": "ELLE Cosmetics"}
+        {"sku": f"S{i}", "brand": "B", "discount_pct": 60, "sale_price": 300,
+         "store_name": "ELLE Cosmetics"}
         for i in range(8)
     ]
-    other = {"sku": "OTHER", "discount_pct": 30, "sale_price": 300, "store_name": "Someone Else"}
+    other = {"sku": "OTHER", "brand": "B", "discount_pct": 30, "sale_price": 300,
+             "store_name": "Someone Else"}
     kept = filter_deals(flood + [other], {}, now=NOW)
     assert sum(1 for p in kept if p["store_name"] == "ELLE Cosmetics") == 2
     assert "OTHER" in [p["sku"] for p in kept]
@@ -81,12 +85,44 @@ def test_one_seller_cannot_take_over_a_run():
 
 def test_identical_listings_from_different_sellers_post_once():
     resold = [
-        {"sku": "X1", "name": "Women's two-piece pajama set", "discount_pct": 71,
-         "sale_price": 300, "store_name": "Store A"},
-        {"sku": "X2", "name": "  women's TWO-piece   pajama set ", "discount_pct": 71,
-         "sale_price": 300, "store_name": "Store B"},
+        {"sku": "X1", "name": "Women's two-piece pajama set", "brand": "B",
+         "discount_pct": 71, "sale_price": 300, "store_name": "Store A"},
+        {"sku": "X2", "name": "  women's TWO-piece   pajama set ", "brand": "B",
+         "discount_pct": 71, "sale_price": 300, "store_name": "Store B"},
     ]
     assert [p["sku"] for p in filter_deals(resold, {}, now=NOW)] == ["X1"]
+
+
+def test_unbranded_unreviewed_filler_never_qualifies():
+    filler = {"sku": "F", "name": "2 pcs set", "discount_pct": 70, "sale_price": 220}
+    assert filter_deals([filler], {}, now=NOW) == []
+    # A brand or a single review is enough to make it a product again.
+    assert filter_deals([{**filler, "brand": "Zara"}], {}, now=NOW) != []
+    assert filter_deals([{**filler, "rating_count": 4}], {}, now=NOW) != []
+
+
+def test_commission_rate_beats_basket_size_in_the_ranking():
+    # The panel caps commission per item, so the expensive low-rate product is
+    # worth less than the mid-priced high-rate one. Ranking on price got this
+    # exactly backwards for a month.
+    television = {"sku": "TV", "brand": "LG", "discount_pct": 40, "sale_price": 45000,
+                  "category": "electronics-and-mobiles/home-audio"}
+    fragrance = {"sku": "PERF", "brand": "Dior", "discount_pct": 40, "sale_price": 6000,
+                 "category": "beauty/fragrance"}
+    assert expected_commission(television) == COMMISSION_CAP_EGP
+    assert expected_commission(fragrance) == 480.0
+    assert [p["sku"] for p in filter_deals([television, fragrance], {}, now=NOW)] == ["TV", "PERF"]
+
+    # …and once the television is merely expensive rather than cap-breaking, the
+    # 8% category wins outright.
+    cheaper_tv = {**television, "sale_price": 12000}
+    assert expected_commission(cheaper_tv) < expected_commission(fragrance)
+    assert [p["sku"] for p in filter_deals([cheaper_tv, fragrance], {}, now=NOW)] == ["PERF", "TV"]
+
+
+def test_untagged_products_still_get_a_rate():
+    # Deals archived before categories existed must not score zero forever.
+    assert expected_commission({"sale_price": 1000}) == 50.0
 
 
 def test_recently_posted_blocks_but_old_entries_expire():
