@@ -1,6 +1,24 @@
 {
  "deals": [
   {
+   "sku": "N37410945A",
+   "name": "Fishing Game 9269",
+   "brand": "",
+   "category": "toys-and-games/games-18311",
+   "store_name": "Brand House",
+   "image_url": "https://f.nooncdn.com/p/v1587656443/N37410945A_1.jpg",
+   "sale_price": 299.01,
+   "original_price": 532.0,
+   "discount_pct": 43,
+   "rating": 4.0,
+   "rating_count": 58,
+   "fulfilled_by_noon": false,
+   "free_delivery": true,
+   "is_bestseller": false,
+   "url": "https://www.noon.com/egypt-en/fishing-game-9269/N37410945A/p/?o=cb80ca55adcbf5dd&utm_campaign=CMP2ce0b63a6a1anoon&utm_medium=AFFccacc092d97d&utm_source=C1000264L&adjust_deeplink_js=1",
+   "posted_at": "2026-08-09T16:32:23.888068+00:00"
+  },
+  {
    "sku": "Z6E67F4199ED2482BA257Z",
    "name": "Root to End Dry Shampoo For Oily & Greasy Hair 200 ml",
    "brand": "",
