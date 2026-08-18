@@ -1,6 +1,42 @@
 {
  "deals": [
   {
+   "sku": "Z2F0DF752B8697DD67B0AZ",
+   "name": "Ab Workout Machine",
+   "brand": "",
+   "category": "sports-and-outdoors/exercise-and-fitness",
+   "store_name": "EG SHOP",
+   "image_url": "https://f.nooncdn.com/p/pzsku/Z2F0DF752B8697DD67B0AZ/45/1761839730/03ab0a78-1584-4d81-abf0-0073e2f26a2d.jpg",
+   "sale_price": 585.0,
+   "original_price": 799.0,
+   "discount_pct": 26,
+   "rating": null,
+   "rating_count": null,
+   "fulfilled_by_noon": false,
+   "free_delivery": true,
+   "is_bestseller": false,
+   "url": "https://www.noon.com/egypt-en/ab-workout-machine/Z2F0DF752B8697DD67B0AZ/p/?o=ff11b9ac0d518d0a&utm_campaign=CMP2ce0b63a6a1anoon&utm_medium=AFFccacc092d97d&utm_source=C1000264L&adjust_deeplink_js=1",
+   "posted_at": "2026-08-18T12:41:22.657353+00:00"
+  },
+  {
+   "sku": "Z7531DEC1E5D65871CCD3Z",
+   "name": "DC Batman Vacuum Insulated Stainless Steel Bottle - 112-81-22",
+   "brand": "",
+   "category": "sports-and-outdoors/exercise-and-fitness",
+   "store_name": "TOYAGATOR",
+   "image_url": "https://f.nooncdn.com/p/pzsku/Z7531DEC1E5D65871CCD3Z/45/1768375270/59dbf858-7d25-4c7f-83a2-61f5205b1ddc.jpg",
+   "sale_price": 689.0,
+   "original_price": 959.0,
+   "discount_pct": 28,
+   "rating": null,
+   "rating_count": null,
+   "fulfilled_by_noon": false,
+   "free_delivery": true,
+   "is_bestseller": false,
+   "url": "https://www.noon.com/egypt-en/dc-batman-vacuum-insulated-stainless-steel-bottle-112-81-22/Z7531DEC1E5D65871CCD3Z/p/?o=aebdcf87d732353f&utm_campaign=CMP2ce0b63a6a1anoon&utm_medium=AFFccacc092d97d&utm_source=C1000264L&adjust_deeplink_js=1",
+   "posted_at": "2026-08-18T12:41:18.830719+00:00"
+  },
+  {
    "sku": "Z93FD9C2CECBD29263F01Z",
    "name": "Dream Town Dream Parade Train Blocks 930 Pieces - 20391",
    "brand": "",
