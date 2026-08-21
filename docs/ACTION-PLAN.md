@@ -58,6 +58,9 @@ you wait** — do it before item 1 starts paying off, not after.
 - [ ] Add two repository **secrets**: `FACEBOOK_PAGE_ID`, `FACEBOOK_PAGE_TOKEN`
 - [ ] Run the workflow and check the Page
 
+Click-by-click walkthrough — Page name, category, copy-paste Arabic bio, token
+steps: [FACEBOOK-SETUP.md](FACEBOOK-SETUP.md)
+
 The code is written and idle. Unset, it is a no-op — there is no risk in leaving it
 off, and no work left to turn it on.
 

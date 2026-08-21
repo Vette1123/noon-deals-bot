@@ -1,0 +1,41 @@
+<!doctype html><meta charset="utf-8">
+<style>
+  html,body{margin:0;padding:0}
+  body{
+    width:1640px;height:856px;overflow:hidden;position:relative;
+    background:
+      radial-gradient(900px 620px at 50% 40%, #2a0f18 0%, transparent 65%),
+      linear-gradient(140deg,#0d1013 0%,#14181c 55%,#1a1014 100%);
+    font-family:"Segoe UI","Tahoma",sans-serif;
+  }
+  /* Facebook crops the sides on mobile and drops the profile picture over the
+     lower-left on desktop, so everything lives in a centred ~1080x620 safe box. */
+  .band{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+        width:1080px;display:flex;align-items:center;justify-content:center;gap:56px}
+  .copy{direction:rtl;text-align:right;color:#eef1f4}
+  h1{margin:0;font-size:96px;line-height:1.14;font-weight:800;letter-spacing:-1px;white-space:nowrap}
+  h1 em{font-style:normal;color:#ff5c7f}
+  p{margin:22px 0 0;font-size:38px;line-height:1.4;color:#9aa4ad;font-weight:600;white-space:nowrap}
+  .url{margin-top:34px;display:inline-block;direction:ltr;
+       font-size:28px;letter-spacing:.5px;color:#fff;font-weight:700;
+       background:#c81e4a;padding:14px 28px;border-radius:999px}
+  .mark{flex:0 0 auto}
+  .rule{position:absolute;left:0;right:0;bottom:0;height:14px;
+        background:linear-gradient(90deg,#c81e4a,#ff5c7f 55%,#c81e4a)}
+</style>
+<div class="band">
+  <svg class="mark" width="300" height="300" viewBox="0 0 1024 1024">
+    <g fill="none" stroke="#ff5c7f" stroke-width="76" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="368" cy="352" r="92"/>
+      <circle cx="672" cy="656" r="92"/>
+      <path d="M716 306 L352 670"/>
+      <path d="M497 631 L352 670 L391 525"/>
+    </g>
+  </svg>
+  <div class="copy">
+    <h1>عروض نون مصر<br><em>أول بأول</em></h1>
+    <p>أقوى الخصومات الحقيقية، كل ٤ ساعات</p>
+    <span class="url">t.me/noon_hot_deals</span>
+  </div>
+</div>
+<div class="rule"></div>

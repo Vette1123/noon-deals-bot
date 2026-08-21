@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="field" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e0244f"/>
+      <stop offset="1" stop-color="#a3153c"/>
+    </linearGradient>
+  </defs>
+
+  <!-- full-bleed field: Facebook crops profile pictures to a circle -->
+  <rect width="1024" height="1024" fill="url(#field)"/>
+
+  <!-- Percent mark drawn as geometry, so no font has to be present at render time.
+       The slash ends in an arrowhead: a price that is falling, still readable at 40px. -->
+  <g fill="none" stroke="#ffffff" stroke-width="76" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="368" cy="352" r="92"/>
+    <circle cx="672" cy="656" r="92"/>
+    <path d="M716 306 L352 670"/>
+    <path d="M497 631 L352 670 L391 525"/>
+  </g>
+</svg>
