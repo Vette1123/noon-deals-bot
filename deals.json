@@ -1,6 +1,42 @@
 {
  "deals": [
   {
+   "sku": "ZF20E6D28A32B3D715292Z",
+   "name": "Magnet Stick Game Set 66 Pieces - HD380A",
+   "brand": "",
+   "category": "toys-and-games/building-toys",
+   "store_name": "Dream City Toys",
+   "image_url": "https://f.nooncdn.com/p/pzsku/ZF20E6D28A32B3D715292Z/45/1761208395/12c244de-e92b-416f-9c55-3407fd5c58ff.jpg",
+   "sale_price": 969.0,
+   "original_price": 1389.0,
+   "discount_pct": 30,
+   "rating": null,
+   "rating_count": null,
+   "fulfilled_by_noon": false,
+   "free_delivery": true,
+   "is_bestseller": false,
+   "url": "https://www.noon.com/egypt-en/magnet-stick-game-set-66-pieces-hd380a/ZF20E6D28A32B3D715292Z/p/?o=b34a8b757a7e0bbf&utm_campaign=CMP2ce0b63a6a1anoon&utm_medium=AFFccacc092d97d&utm_source=C1000264L&adjust_deeplink_js=1",
+   "posted_at": "2026-09-20T09:05:02.206441+00:00"
+  },
+  {
+   "sku": "Z55D2B9FE68E69B957775Z",
+   "name": "Spiderman Wooden Soccer Game - 235S",
+   "brand": "",
+   "category": "toys-and-games/games-18311",
+   "store_name": "Dream City Toys",
+   "image_url": "https://f.nooncdn.com/p/pzsku/Z55D2B9FE68E69B957775Z/45/_/1675866397/7e208ca1-6c3e-4454-a5d4-d87e8cfd3b27.jpg",
+   "sale_price": 1549.0,
+   "original_price": 2259.0,
+   "discount_pct": 31,
+   "rating": null,
+   "rating_count": null,
+   "fulfilled_by_noon": false,
+   "free_delivery": true,
+   "is_bestseller": false,
+   "url": "https://www.noon.com/egypt-en/spiderman-wooden-soccer-game-235s/Z55D2B9FE68E69B957775Z/p/?o=z55d2b9fe68e69b957775z-1&utm_campaign=CMP2ce0b63a6a1anoon&utm_medium=AFFccacc092d97d&utm_source=C1000264L&adjust_deeplink_js=1",
+   "posted_at": "2026-09-20T09:04:50.402962+00:00"
+  },
+  {
    "sku": "N53428237A",
    "name": "All Around Safe Block Cotton SPF50+ White 50ml",
    "brand": "Missha",
