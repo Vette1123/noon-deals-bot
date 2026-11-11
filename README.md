@@ -10,12 +10,12 @@
 
 **Channel:** [t.me/noon_hot_deals](https://t.me/noon_hot_deals) · **Site:** ديلز مصر — [vette1123.github.io/noon-deals-bot](https://vette1123.github.io/noon-deals-bot/)
 
-Auto-posts the best discounted products from [noon.com Egypt](https://www.noon.com/egypt-en/) to a Telegram channel, 6× a day — **fully free to run, no login required.**
+Auto-posts the best discounted products from [noon.com Egypt](https://www.noon.com/egypt-en/) to a Telegram channel, 6× a day. It is free to run and needs no login.
 
-- Scrapes noon's deal pages using `curl_cffi` (Chrome TLS impersonation — no paid API)
+- Scrapes noon's deal pages using `curl_cffi` (Chrome TLS impersonation, no paid API)
 - Attaches your influencer coupon code to every post as **tap-to-copy** text
 - Posts Arabic-formatted product cards with images to Telegram
-- Republishes the same deals as a **static Arabic site on GitHub Pages** so search traffic earns too
+- Republishes the same deals as a static Arabic site on GitHub Pages so search traffic earns too
 - Optionally crossposts to a **Facebook Page**
 - Runs on GitHub Actions — no server required
 
@@ -56,11 +56,11 @@ Rates are per category and payout is **capped at AED 50 per item**, which makes 
 
 ## The static site
 
-Every deal is archived to [deals.json](deals.json) and rendered into an Arabic (RTL) site: a front page, one page per deal with `Product` structured data, a hub per **category** and per **brand**, a directory of each, a paginated archive, `sitemap.xml`, `robots.txt` and an RSS feed. No web fonts, no CSS files, no script bundles — search traffic arrives on mobile data, and page speed is ranking. It follows the device's light/dark setting, with a toggle that remembers an explicit choice.
+Every deal is archived to [deals.json](deals.json) and rendered into an Arabic (RTL) site: a front page, one page per deal with `Product` structured data, a hub per **category** and per **brand**, a directory of each, a paginated archive, `sitemap.xml`, `robots.txt` and an RSS feed. The pages use no web fonts, CSS files or script bundles. Search traffic arrives on mobile data, and page speed affects ranking. It follows the device's light/dark setting, with a toggle that remembers an explicit choice.
 
-It matters because it earns **without an audience**: a Telegram post reaches today's subscribers, a page that ranks reaches everyone who searches.
+It earns without an audience: a Telegram post reaches today's subscribers, a page that ranks reaches everyone who searches.
 
-Two rules it will not break:
+It follows two rules:
 
 - **Deal pages never 404.** A deal that ages out becomes a `noindex` tombstone linking on to its hubs, because a URL that took four months to rank is the one thing here that cannot be rebuilt.
 - **`priceValidUntil` comes from when the deal was seen**, not from the build, so a rebuild never re-certifies an old price as current.
@@ -71,8 +71,8 @@ Enable it once under *Settings → Pages → Source: GitHub Actions*; the `publi
 
 Every build re-emits two ownership files at the site root, and every deploy announces what changed:
 
-- **Google Search Console** — `google<token>.html`, served verbatim. Verify the property once, then submit `sitemap.xml`. A fork points `GOOGLE_SITE_VERIFICATION` at its own token.
-- **IndexNow** — `<key>.txt` plus a POST to `api.indexnow.org` *after* the deploy, listing only the pages that run changed: the front page, the new deal pages and the hubs they landed on. Bing, Yandex and Seznam then crawl in minutes instead of weeks. Google does not participate — there, `sitemap.xml` + `lastmod` is still the lever. The key is public by design (serving it is the proof of ownership), so it belongs in `INDEXNOW_KEY` as a *variable*, never a secret.
+- **Google Search Console**: `google<token>.html`, served verbatim. Verify the property once, then submit `sitemap.xml`. A fork points `GOOGLE_SITE_VERIFICATION` at its own token.
+- **IndexNow**: `<key>.txt` plus a POST to `api.indexnow.org` *after* the deploy, listing only the pages that run changed: the front page, the new deal pages and the hubs they landed on. Bing, Yandex and Seznam then crawl in minutes instead of weeks. Google does not participate — there, `sitemap.xml` + `lastmod` is still the lever. The key is public by design (serving it is the proof of ownership), so it belongs in `INDEXNOW_KEY` as a *variable*, never a secret.
 
 Neither can fail a run: a malformed token is dropped with a warning, and a rejected ping is logged and ignored.
 
@@ -125,7 +125,7 @@ python main.py             # real run
 | `FACEBOOK_PAGE_ID` | *(optional)* Enables the Facebook crosspost. Skipped when unset. |
 | `FACEBOOK_PAGE_TOKEN` | *(optional)* Long-lived Page token with `pages_manage_posts`. |
 
-Two are truly required. No scraping API key, no noon.partners login, no session rotation, no OTP flow.
+Only the two Telegram secrets are required. There is no scraping API key, noon.partners login, session rotation or OTP flow.
 
 ## Running tests
 
