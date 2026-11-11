@@ -110,8 +110,8 @@ python main.py --dry-run   # prints what would be posted, skips Telegram
 python main.py             # real run
 ```
 
-> Since mid-2026 Akamai also challenges cold requests from residential IPs, so a local run may fail at
-> the fetch step with `Akamai JS challenge`. CI is unaffected (it egresses through Cloudflare WARP).
+> noon.com sits behind Akamai, which can challenge cold requests, so a local run may fail at
+> the fetch step with `Akamai JS challenge`. In CI the bot egresses through Cloudflare WARP, which avoids this.
 > To debug parsing locally, save the page HTML from a real browser and feed it to
 > `scraper.parse_products_from_html`.
 
