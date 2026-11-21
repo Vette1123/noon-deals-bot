@@ -1,6 +1,24 @@
 {
  "deals": [
   {
+   "sku": "N49176779A",
+   "name": "Pe.Nilco Ghost Secret/32113",
+   "brand": "NILCO",
+   "category": "toys-and-games/games-18311",
+   "store_name": "Hedeya Store",
+   "image_url": "https://f.nooncdn.com/p/v1626352147/N49176779A_1.jpg",
+   "sale_price": 175.5,
+   "original_price": 250.0,
+   "discount_pct": 29,
+   "rating": 4.5,
+   "rating_count": 14,
+   "fulfilled_by_noon": false,
+   "free_delivery": true,
+   "is_bestseller": false,
+   "url": "https://www.noon.com/egypt-en/pe-nilco-ghost-secret-32113/N49176779A/p/?o=b43f436f4d8672df&utm_campaign=CMP2ce0b63a6a1anoon&utm_medium=AFFccacc092d97d&utm_source=C1000264L&adjust_deeplink_js=1",
+   "posted_at": "2026-11-21T12:06:51.225488+00:00"
+  },
+  {
    "sku": "Z2B2F6C34FBD93E0F6A88Z",
    "name": "Lady Speed ​​Stick Deodorant Coconut Scent - 40 g ( Packaging May Vary )",
    "brand": "Lady Speed Stick",
